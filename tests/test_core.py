@@ -1,5 +1,5 @@
 """
-Unit tests for skills-cli core functions.
+Unit tests for agentkit core functions.
 
 These tests ensure the core logic works correctly before and after refactoring.
 Run with: python -m pytest tests/ -v
@@ -8,8 +8,13 @@ Run with: python -m pytest tests/ -v
 import tempfile
 from pathlib import Path
 
-from skills_cli import (
+from agentkit import (
     parse_repo_url,
+    ARTIFACT_CONFIG,
+    discover_artifacts,
+    find_artifacts_root,
+    get_claude_artifacts_dir,
+    validate_artifact_md,
     discover_skills,
     find_skills_root,
     parse_skill_md,
@@ -162,6 +167,25 @@ class TestDiscoverSkills:
         assert skills == []
 
 
+class TestDiscoverArtifacts:
+    """Tests for discover_artifacts function."""
+
+    def test_discover_commands_in_directory(self):
+        """Discover commands using COMMAND.md marker files."""
+        with tempfile.TemporaryDirectory() as tmp:
+            commands_dir = Path(tmp)
+
+            (commands_dir / "build").mkdir()
+            (commands_dir / "build" / "COMMAND.md").write_text(
+                "---\nname: Build\ndescription: Build project\n---\nContent"
+            )
+
+            commands = discover_artifacts(commands_dir, artifact_type="commands")
+
+            assert len(commands) == 1
+            assert commands[0].get("name") == "Build"
+
+
 class TestFindSkillsRoot:
     """Tests for find_skills_root function."""
 
@@ -231,6 +255,26 @@ class TestFindSkillsRoot:
 
             assert len(skills) == 1
             assert skills[0].get("name") == "Deep Skill"
+
+
+class TestFindArtifactsRoot:
+    """Tests for find_artifacts_root function."""
+
+    def test_find_agents_in_common_subdir(self):
+        """Find agents in common subdirectory (agents/)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+
+            (repo_root / "agents" / "reviewer").mkdir(parents=True)
+            (repo_root / "agents" / "reviewer" / "AGENT.md").write_text(
+                "---\nname: Reviewer\ndescription: Reviews code\n---\nContent"
+            )
+
+            root, agents = find_artifacts_root(repo_root, artifact_type="agents")
+
+            assert root == repo_root / "agents"
+            assert len(agents) == 1
+            assert agents[0]["folder_name"] == "reviewer"
 
 
 class TestParseSkillMd:
@@ -357,6 +401,33 @@ class TestValidateSkillMd:
             issues = validate_skill_md(skill_dir)
 
             assert any("name" in issue.lower() and "long" in issue.lower() for issue in issues)
+
+
+class TestValidateArtifactMd:
+    """Tests for validate_artifact_md function."""
+
+    def test_missing_marker_for_plugin(self):
+        """Missing PLUGIN.md should be reported for plugins."""
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin_dir = Path(tmp)
+            issues = validate_artifact_md(plugin_dir, artifact_type="plugins")
+
+            assert len(issues) == 1
+            assert "PLUGIN.md" in issues[0]
+
+
+class TestArtifactPaths:
+    """Tests for artifact path helpers."""
+
+    def test_artifact_config_contains_expected_types(self):
+        """Artifact config should include all supported types."""
+        assert set(ARTIFACT_CONFIG.keys()) == {"skills", "commands", "agents", "plugins"}
+
+    def test_project_artifact_dir(self):
+        """Project artifact directory uses .claude/<type>."""
+        commands_dir = get_claude_artifacts_dir("commands", scope="project")
+        assert commands_dir.name == "commands"
+        assert commands_dir.parent.name == ".claude"
 
 
 if __name__ == "__main__":

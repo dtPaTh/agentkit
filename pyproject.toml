@@ -3,16 +3,16 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "skills-cli"
-version = "0.2.3"
-description = "Cross-platform CLI for managing Claude Code and Claude Desktop skills"
+name = "agentkit"
+version = "0.3.0"
+description = "Cross-platform CLI for managing Claude Code and Claude Desktop artifacts"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 authors = [
-    { name = "KC" }
+    { name = "Patrick Thurner" }
 ]
-keywords = ["claude", "anthropic", "skills", "cli", "ai"]
+keywords = ["claude", "anthropic", "skills", "agents", "plugins", "cli", "ai"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -42,15 +42,15 @@ windows = [
 ]
 
 [project.scripts]
-skills-cli = "skills_cli:main"
+agentkit = "agentkit:main"
 
 [project.urls]
-Homepage = "https://github.com/kcchien/skills-cli"
-Documentation = "https://github.com/kcchien/skills-cli#readme"
-Repository = "https://github.com/kcchien/skills-cli"
+Homepage = "https://github.com/dtPaTh/agentkit"
+Documentation = "https://github.com/dtPaTh/agentkit#readme"
+Repository = "https://github.com/dtPaTh/agentkit"
 
 [tool.setuptools]
-packages = ["skills_cli"]
+packages = ["agentkit"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

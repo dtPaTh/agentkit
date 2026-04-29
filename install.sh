@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Skills CLI Installer for macOS/Linux
+# AgentKit Installer for macOS/Linux
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/kcchien/skills-cli/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/dtPaTh/agentkit/main/install.sh | bash
 #
 # Or with custom options:
 #   curl -fsSL ... | bash -s -- --user    # Install to user site-packages
@@ -24,7 +24,7 @@ warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
 # Default values
-REPO_URL="https://github.com/kcchien/skills-cli.git"
+REPO_URL="https://github.com/dtPaTh/agentkit.git"
 USER_INSTALL=false
 
 # Parse arguments
@@ -56,7 +56,7 @@ done
 
 # Header
 echo ""
-echo "  Skills CLI Installer"
+echo "  AgentKit Installer"
 echo "  ===================="
 echo ""
 
@@ -95,7 +95,7 @@ if ! python3 -m pip --version &>/dev/null; then
 fi
 
 # Install via pip
-info "Installing skills-cli via pip..."
+info "Installing agentkit via pip..."
 
 PIP_ARGS="install --upgrade --no-cache-dir"
 if [[ "$USER_INSTALL" == true ]]; then
@@ -110,14 +110,14 @@ else
 fi
 
 # Verify installation
-if command -v skills-cli &>/dev/null; then
-    INSTALLED_PATH=$(command -v skills-cli)
+if command -v agentkit &>/dev/null; then
+    INSTALLED_PATH=$(command -v agentkit)
     success "Installed to $INSTALLED_PATH"
 else
     # Check if installed to user bin
     USER_BIN="$HOME/.local/bin"
-    if [[ -f "$USER_BIN/skills-cli" ]]; then
-        success "Installed to $USER_BIN/skills-cli"
+    if [[ -f "$USER_BIN/agentkit" ]]; then
+        success "Installed to $USER_BIN/agentkit"
         if [[ ":$PATH:" != *":$USER_BIN:"* ]]; then
             warn "$USER_BIN is not in PATH"
 
@@ -132,7 +132,7 @@ else
 
             if [[ -n "$RC_FILE" ]] && [[ -f "$RC_FILE" ]]; then
                 echo "" >> "$RC_FILE"
-                echo "# Added by skills-cli installer" >> "$RC_FILE"
+                echo "# Added by agentkit installer" >> "$RC_FILE"
                 echo "export PATH=\"\$PATH:$USER_BIN\"" >> "$RC_FILE"
                 info "Added to $RC_FILE"
                 warn "Run 'source $RC_FILE' or restart your terminal"
@@ -148,7 +148,7 @@ echo ""
 success "Installation complete!"
 echo ""
 echo "  Usage:"
-echo "    skills-cli list"
-echo "    skills-cli install --all"
-echo "    skills-cli --help"
+echo "    agentkit list"
+echo "    agentkit install --all"
+echo "    agentkit --help"
 echo ""

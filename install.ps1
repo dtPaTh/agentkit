@@ -1,8 +1,8 @@
 #
-# Skills CLI Installer for Windows
+# AgentKit Installer for Windows
 #
 # Usage (PowerShell):
-#   irm https://raw.githubusercontent.com/kcchien/skills-cli/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/dtPaTh/agentkit/main/install.ps1 | iex
 #
 # Or run directly:
 #   .\install.ps1
@@ -10,7 +10,7 @@
 #
 
 $ErrorActionPreference = "Stop"
-$RepoUrl = "https://github.com/kcchien/skills-cli.git"
+$RepoUrl = "https://github.com/dtPaTh/agentkit.git"
 
 # Check for environment variable override
 $UserInstall = $env:USER_INSTALL -eq "true"
@@ -22,7 +22,7 @@ function Write-Warn { Write-Host "[WARN] $args" -ForegroundColor Yellow }
 function Write-Err { Write-Host "[ERROR] $args" -ForegroundColor Red }
 
 Write-Host ""
-Write-Host "  Skills CLI Installer"
+Write-Host "  AgentKit Installer"
 Write-Host "  ===================="
 Write-Host ""
 
@@ -65,7 +65,7 @@ try {
 }
 
 # Install via pip
-Write-Info "Installing skills-cli via pip..."
+Write-Info "Installing agentkit via pip..."
 
 try {
     if ($UserInstall) {
@@ -95,7 +95,7 @@ try {
 # Verify installation
 $skillsCliPath = $null
 try {
-    $skillsCliPath = (Get-Command skills-cli -ErrorAction SilentlyContinue).Source
+    $skillsCliPath = (Get-Command agentkit -ErrorAction SilentlyContinue).Source
 } catch {}
 
 if ($skillsCliPath) {
@@ -104,7 +104,7 @@ if ($skillsCliPath) {
     # Check user Scripts folder
     $userScripts = Join-Path $env:APPDATA "Python\Python*\Scripts"
     $possiblePaths = Get-ChildItem $userScripts -ErrorAction SilentlyContinue |
-                     Where-Object { Test-Path (Join-Path $_.FullName "skills-cli.exe") }
+                     Where-Object { Test-Path (Join-Path $_.FullName "agentkit.exe") }
 
     if ($possiblePaths) {
         $scriptsPath = $possiblePaths[0].FullName
@@ -130,9 +130,9 @@ Write-Host ""
 Write-Success "Installation complete!"
 Write-Host ""
 Write-Host "  Usage:"
-Write-Host "    skills-cli list"
-Write-Host "    skills-cli install --all"
-Write-Host "    skills-cli --help"
+Write-Host "    agentkit list"
+Write-Host "    agentkit install --all"
+Write-Host "    agentkit --help"
 Write-Host ""
 
 # Refresh environment for current session

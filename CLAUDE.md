@@ -1,4 +1,4 @@
-# Skills CLI - Project Memory
+# AgentKit - Project Memory
 
 ## Project Overview
 Cross-platform CLI tool for managing Claude Code and Claude Desktop skills. Written in Python with no external dependencies (uses only standard library).
@@ -6,12 +6,12 @@ Cross-platform CLI tool for managing Claude Code and Claude Desktop skills. Writ
 ## Tech Stack
 - **Language**: Python 3.10+
 - **Build System**: setuptools with pyproject.toml
-- **Entry Point**: `skills-cli` command via `skills_cli:main`
+- **Entry Point**: `agentkit` command via `agentkit:main`
 
 ## Project Structure
 ```
-skills-cli/
-├── skills_cli/
+agentkit/
+├── agentkit/
 │   ├── __init__.py    # Package init, exports main()
 │   ├── cli.py         # CLI argument parsing and commands
 │   └── core.py        # Core logic (git operations, skill discovery, etc.)
@@ -21,14 +21,14 @@ skills-cli/
 ```
 
 ## Key Commands
-- `skills-cli list [URL]` - List available skills from a repository
-- `skills-cli install [URL]` - Install skills from a repository
-- `skills-cli installed` - List locally installed skills
-- `skills-cli remove` - Remove installed skills
-- `skills-cli sync [URL]` - Sync skills from a repository
-- `skills-cli pack [URL]` - Pack skills into zip files
-- `skills-cli validate` - Validate SKILL.md format
-- `skills-cli doctor` - Diagnose skills directory issues
+- `agentkit list [URL]` - List available artifacts from a repository
+- `agentkit install [URL]` - Install artifacts from a repository
+- `agentkit installed` - List locally installed artifacts
+- `agentkit remove` - Remove installed artifacts
+- `agentkit sync [URL]` - Sync artifacts from a repository
+- `agentkit pack [URL]` - Pack artifacts into zip files
+- `agentkit validate` - Validate artifacts format
+- `agentkit doctor` - Diagnose artifacts directory issues
 
 ## Development
 ```bash
@@ -39,17 +39,8 @@ pip install -e .
 pytest
 
 # Run directly
-python -m skills_cli.cli
+python -m agentkit.cli
 ```
 
-## Git Remotes
-- **origin**: git@github.com:kcchien/skills-cli.git (GitHub)
-- Note: User mentioned there may also be a GitLab remote (not currently configured)
 
-## Recent Changes
-- Added support for positional URL arguments (previously only `--repo` flag was supported)
-- Commands `install`, `list`, `sync`, `pack` now accept URL as first positional argument
 
-## Commit Message Style
-- Uses conventional commits format (feat:, fix:, chore:, docs:)
-- User prefers detailed commit messages in Traditional Chinese (zh-TW)

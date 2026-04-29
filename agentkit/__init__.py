@@ -1,10 +1,10 @@
 """
-Skills CLI - Cross-platform CLI for managing Claude Code skills
+Artifacts CLI - Cross-platform CLI for managing Claude Code artifacts
 
 Public API:
     - parse_repo_url: Parse various Git repository URL formats
-    - discover_skills: Find skills in a directory
-    - find_skills_root: Search for skills root in a repository
+    - discover_artifacts: Find artifacts in a directory
+    - find_artifacts_root: Search for artifact root in a repository
     - parse_skill_md: Parse SKILL.md frontmatter
     - validate_skill_md: Validate SKILL.md format
     - install_skill: Install a skill to a directory
@@ -15,7 +15,7 @@ CLI Entry Point:
     - main: CLI main function
 """
 
-__version__ = "0.2.3"
+__version__ = "0.3.0"
 
 from .core import (
     # Constants
@@ -23,6 +23,7 @@ from .core import (
     METADATA_FILE,
     COMMON_SKILL_DIRS,
     REQUIRED_SKILL_FIELDS,
+    ARTIFACT_CONFIG,
 
     # Logging
     Colors,
@@ -41,21 +42,31 @@ from .core import (
     clone_repo,
 
     # Metadata
+    write_artifact_metadata,
+    read_artifact_metadata,
     write_skill_metadata,
     read_skill_metadata,
 
     # Skill Discovery
+    discover_artifacts,
+    find_artifacts_root,
+    parse_artifact_md,
     discover_skills,
     find_skills_root,
     parse_skill_md,
 
     # Installation
+    get_claude_artifacts_dir,
+    backup_artifact,
+    install_artifact,
+    pack_artifact,
     get_claude_skills_dir,
     backup_skill,
     install_skill,
     pack_skill,
 
     # Validation
+    validate_artifact_md,
     validate_skill_md,
 )
 
@@ -67,6 +78,7 @@ __all__ = [
     "METADATA_FILE",
     "COMMON_SKILL_DIRS",
     "REQUIRED_SKILL_FIELDS",
+    "ARTIFACT_CONFIG",
 
     # Logging
     "Colors",
@@ -85,21 +97,31 @@ __all__ = [
     "clone_repo",
 
     # Metadata
+    "write_artifact_metadata",
+    "read_artifact_metadata",
     "write_skill_metadata",
     "read_skill_metadata",
 
     # Skill Discovery
+    "discover_artifacts",
+    "find_artifacts_root",
+    "parse_artifact_md",
     "discover_skills",
     "find_skills_root",
     "parse_skill_md",
 
     # Installation
+    "get_claude_artifacts_dir",
+    "backup_artifact",
+    "install_artifact",
+    "pack_artifact",
     "get_claude_skills_dir",
     "backup_skill",
     "install_skill",
     "pack_skill",
 
     # Validation
+    "validate_artifact_md",
     "validate_skill_md",
 
     # CLI

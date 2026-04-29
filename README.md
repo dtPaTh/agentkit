@@ -1,21 +1,21 @@
 <div align="center">
 
-# 🛠️ Skills CLI
+# 🛠️ AgentKit
 
-**Cross-platform CLI for managing Claude Code and Claude Desktop skills**
+**Cross-platform CLI for managing Claude Code and Claude Desktop artifacts**
 
-<img src="assets/hero.svg" alt="Skills CLI Architecture" width="700"/>
+<img src="assets/hero.svg" alt="Artifacts CLI Architecture" width="700"/>
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=for-the-badge)](https://github.com/kcchien/skills-cli)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=for-the-badge)](https://github.com/dtPaTh/agentkit)
 
-[![GitHub stars](https://img.shields.io/github/stars/kcchien/skills-cli?style=social)](https://github.com/kcchien/skills-cli/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/kcchien/skills-cli?style=social)](https://github.com/kcchien/skills-cli/network/members)
+[![GitHub stars](https://img.shields.io/github/stars/dtPaTh/agentkit?style=social)](https://github.com/dtPaTh/agentkit/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/dtPaTh/agentkit?style=social)](https://github.com/dtPaTh/agentkit/network/members)
 
 ---
 
-*One definition, multiple deployments* — Deploy skills from a central Git repository to both Claude Code CLI and Claude Desktop App.
+*One definition, multiple deployments* — Deploy `skills`, `commands`, `agents`, and `plugins` (artifacts) from a central Git repository to both Claude Code CLI and Claude Desktop App.
 
 [Installation](#installation) •
 [Usage](#usage) •
@@ -24,21 +24,21 @@
 
 </div>
 
-## 💡 Why Skills CLI?
+## 💡 Why AgentKit?
 
 <table>
 <tr>
 <td width="33%" align="center">
 <h3>🔗 Git-First</h3>
-<p>Any Git repository can become a skills source. Use official repos, fork your own, or host privately — full flexibility.</p>
+<p>Any Git repository can become an artifact source. Use official repos, fork your own, or host privately — full flexibility.</p>
 </td>
 <td width="33%" align="center">
 <h3>🎯 Dual Environment</h3>
-<p>One skill definition, two targets. Deploy to <b>Claude Code CLI</b> and pack for <b>Claude Desktop</b> simultaneously.</p>
+<p>One artifact definition, two targets. Deploy to <b>Claude Code CLI</b> and pack for <b>Claude Desktop</b> simultaneously.</p>
 </td>
 <td width="33%" align="center">
 <h3>📍 Metadata Tracking</h3>
-<p>Every installed skill records its source repo, commit hash, and install time. Always know where your skills came from.</p>
+<p>Every installed artifact records its source repo, commit hash, and install time. Always know where your artifacts came from.</p>
 </td>
 </tr>
 </table>
@@ -50,30 +50,32 @@
 | 🖥️ **Cross-platform** | Windows, macOS, Linux |
 | 📦 **Zero dependencies** | Uses only Python standard library |
 | 🔗 **Flexible repo support** | GitHub, GitLab, self-hosted Git with subdirectory paths |
-| 🏠 **Default repo** | Uses [Anthropic official skills](https://github.com/anthropics/skills) by default |
-| 🎯 **Selective installation** | Install all skills or choose specific ones |
+| 🏠 **Default repo** | Uses [Anthropic official skills](https://github.com/anthropics/skills) by default (overridable via env var) |
+| 🧩 **Multi-artifact support** | Manages `skills`, `commands`, `agents`, and `plugins` |
+| 🎯 **Selective installation** | Install all artifacts, pick specific ones by name, or choose interactively — to `global` (`~/.claude/`) or `local` (`.claude/`) scope |
 | 🛡️ **Safety controls** | `--dry-run` preview, `--backup` before overwrite |
-| 📍 **Source tracking** | Records installation source for each skill |
-| 🚀 **Dual deployment** | Claude Code (`~/.claude/skills/`) + Claude Desktop (`.zip` packs) |
+| 📍 **Source tracking** | Records installation source for each artifact |
+| 🚀 **Dual deployment** | Claude Code (`~/.claude/<type>/`) + Claude Desktop (`.zip` packs) |
+| ⚡ **Repo cache** | Repos are cached locally and updated with `git fetch` on reuse |
+
 
 ## 🚀 Quick Start
 
 ```bash
 # Install the CLI
-pip install git+https://github.com/kcchien/skills-cli.git
+pip install git+https://github.com/dtPaTh/agentkit.git
 
-# List available skills from Anthropic's official repo
-skills-cli list
+# List all artifacts from the default repo
+agentkit list
 
-# Install all skills
-skills-cli install --all
+# List only agents from a custom repo 
+agentkit list https://github.com/your-org/your-repo --type agents
 
-# Or pick specific ones
-skills-cli install --skills pdf,xlsx,docx
+# Install a specific agent to global Claude config
+agentkit install https://github.com/your-org/your-repo --type agents --items my-agent
 
-# Use your own skills repository
-skills-cli list --repo https://github.com/your-username/your-skills
-skills-cli install --repo https://github.com/your-username/your-skills --all
+# Install to the current project instead
+agentkit install https://github.com/your-org/your-repo --type agents --items my-agent --scope local
 ```
 
 ## 📥 Installation
@@ -81,159 +83,204 @@ skills-cli install --repo https://github.com/your-username/your-skills --all
 ### macOS / Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kcchien/skills-cli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dtPaTh/agentkit/main/install.sh | bash
 ```
 
 ### Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/kcchien/skills-cli/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/dtPaTh/agentkit/main/install.ps1 | iex
 ```
 
 ### From Source (pip)
 
 ```bash
-git clone https://github.com/kcchien/skills-cli.git
-cd skills-cli
+git clone https://github.com/dtPaTh/agentkit.git
+cd agentkit
 pip install -e .
-```
-
-### Direct Usage (No Install)
-
-```bash
-python skills_cli.py <command> [options]
 ```
 
 ## 📖 Usage
 
+### kubectl-style Syntax
+
+AgentKit supports a shorthand notation inspired by `kubectl` where the **resource type** and **repository URL** can be passed as positional arguments — no flags needed.
+
+```
+agentkit <command> [<type>] [<url>]
+```
+
+| Long form | kubectl-style shorthand |
+|-----------|------------------------|
+| `agentkit list --type agents` | `agentkit list agents` |
+| `agentkit list --type skills --repo <url>` | `agentkit list skills <url>` |
+| `agentkit list --repo <url>` | `agentkit list <url>` |
+| `agentkit install --repo <url> --type agents` | `agentkit install agents <url>` |
+
+The positional parser distinguishes a URL from a type token: if the argument starts with `http`, `git@`, or contains `/`, it is treated as a repository URL; otherwise it is treated as an artifact type (`skills`, `agents`, `commands`, `plugins`).
+
+---
+
 ### Getting Help
 
 ```bash
-# Show all available commands
-skills-cli --help
-
-# Show help for a specific command
-skills-cli list --help
-skills-cli install --help
+agentkit --help
+agentkit list --help
+agentkit install --help
 ```
 
-**Example: Using custom repository**
+---
+
+### List Available Artifacts
+
+`list` shows **all artifact types** by default. Pass a type and/or URL as positional arguments (kubectl-style) or use flags.
 
 ```bash
-# List skills from a custom repository
-skills-cli list --repo https://github.com/your-username/your-skills
+# List all types from the default repo
+agentkit list
 
-# List skills from a specific branch
-skills-cli list --repo https://github.com/your-username/your-skills --branch develop
+# List only agents — three equivalent forms
+agentkit agents list                             # <type> <verb>
+agentkit list agents                             # <verb> <type>
+agentkit list --type agents                      # flag form
 
-# Install all skills from a custom repository
-skills-cli install --repo https://github.com/your-username/your-skills --all
+# List skills from a custom repo — three equivalent forms
+agentkit skills list https://github.com/your-org/your-repo
+agentkit list skills https://github.com/your-org/your-repo
+agentkit list https://github.com/your-org/your-repo --type skills
 
-# Install specific skills from a custom repository
-skills-cli install --repo https://github.com/your-username/your-skills --skills my-skill,another-skill
+# List all types from a custom repo
+agentkit list https://github.com/your-org/your-repo
 
-# Install from a repository subdirectory
-skills-cli install --repo https://github.com/org/monorepo/tree/main/packages/skills --all
+# Show names and descriptions
+agentkit list --detail
+
+# Force a fresh clone, ignoring the local cache
+agentkit list --no-cache
 ```
 
-### List Available Skills
+---
+
+### Install Artifacts
 
 ```bash
-# List skills from official Anthropic repo (default)
-skills-cli list
+# Interactive selection from the default repo
+agentkit install
 
-# List with detailed descriptions
-skills-cli list --detail
+# Install all artifacts from the default repo to global config
+agentkit install --all
 
-# List from custom repo
-skills-cli list --repo https://github.com/user/my-skills
+# Install a specific agent — three equivalent forms
+agentkit agents install --items my-agent
+agentkit install agents --items my-agent
+agentkit install --type agents --items my-agent
+
+# Install all plugins from a custom repo — three equivalent forms
+agentkit plugins install https://github.com/your-org/your-repo --all --scope global
+agentkit install plugins https://github.com/your-org/your-repo --all --scope global
+agentkit install https://github.com/your-org/your-repo --type plugins --all --scope global
+
+# Install to the current project's .claude/ directory
+agentkit plugins install https://github.com/your-org/your-repo --all --scope local
+
+# Preview without making changes
+agentkit install --all --dry-run
+
+# Overwrite existing artifacts with backup
+agentkit install --all --force --backup
+
+# Force fresh clone instead of using cache
+agentkit install --all --no-cache
 ```
 
-### List Installed Skills
+---
 
-```bash
-# Show all installed skills (global + project)
-skills-cli installed
-
-# Show with source tracking info
-skills-cli installed --detail
-
-# Show only project skills
-skills-cli installed --project
-```
-
-### Install Skills
-
-```bash
-# Interactive selection (from default repo)
-skills-cli install
-
-# Install all skills
-skills-cli install --all
-
-# Install specific skills
-skills-cli install --skills pdf,xlsx,docx
-
-# Preview what would be installed (dry run)
-skills-cli install --all --dry-run
-
-# Backup existing skills before overwriting
-skills-cli install --all --force --backup
-
-# Install to project directory (.claude/skills/)
-skills-cli install --all --project
-
-# Install from custom repo
-skills-cli install --repo https://github.com/user/skills --all
-```
-
-### Remove Skills
+### Remove Artifacts
 
 ```bash
 # Interactive selection
-skills-cli remove
+agentkit remove
 
-# Remove specific skills
-skills-cli remove --skills pdf,xlsx
+# Remove specific artifacts
+agentkit remove --items my-skill,another-skill
 
-# Remove all skills (with confirmation)
-skills-cli remove --all
+# Remove all agents — three equivalent forms
+agentkit agents remove --all
+agentkit remove agents --all
+agentkit remove --type agents --all
+
+# Remove from project config instead of global
+agentkit skills remove --all --scope local
 
 # Preview what would be removed
-skills-cli remove --all --dry-run
+agentkit remove --all --dry-run
 
-# Skip confirmation
-skills-cli remove --all --force
+# Skip confirmation prompt
+agentkit remove --all --force
 ```
 
-### Validate Skills
+---
+
+### List Installed Artifacts
 
 ```bash
-# Validate installed skills
-skills-cli validate
+# Show all installed artifacts (global + project)
+agentkit installed
 
-# Validate skills from a remote repo
-skills-cli validate --repo https://github.com/user/skills
+# Show with source tracking info
+agentkit installed --detail
 
-# Validate a local skill directory
-skills-cli validate --path ./my-skill/
+# Show only project-local artifacts
+agentkit installed --project
+
+# Filter by type — three equivalent forms
+agentkit agents installed
+agentkit installed agents
+agentkit installed --type agents
 ```
 
-### Diagnose Issues
+---
+
+### Sync Artifacts
 
 ```bash
-# Check directory structure and common issues
-skills-cli doctor
+# Sync from the default repo to global config
+agentkit sync
+
+# Sync agents from a custom repo — three equivalent forms
+agentkit agents sync https://github.com/your-org/your-repo --scope local
+agentkit sync agents https://github.com/your-org/your-repo --scope local
+agentkit sync https://github.com/your-org/your-repo --type agents --scope local
+
+# Force fresh clone
+agentkit sync --no-cache
 ```
+
+---
+
+### Validate Artifacts
+
+```bash
+# Validate locally installed artifacts
+agentkit validate
+
+# Validate artifacts from a remote repo
+agentkit validate --repo https://github.com/user/skills
+
+# Validate a local artifact directory
+agentkit validate --path ./my-skill/
+```
+
+---
 
 ### Pack for Claude Desktop
 
 ```bash
 # Pack all skills to zip files
-skills-cli pack --output dist/desktop
+agentkit pack --output dist/desktop
 
-# Pack specific skills
-skills-cli pack --skills pdf,xlsx --output dist/
+# Pack specific artifacts
+agentkit pack --items pdf,xlsx --output dist/
 ```
 
 Output:
@@ -241,22 +288,45 @@ Output:
 dist/desktop/
 ├── pdf.zip
 ├── xlsx.zip
-├── docx.zip
 └── manifest.json
 ```
 
-### Sync Skills (Git Pull/Clone)
+---
+
+### Diagnose Issues
 
 ```bash
-# Sync to personal skills directory
-skills-cli sync
-
-# Sync to project directory
-skills-cli sync --project
-
-# Sync from custom repo
-skills-cli sync --repo https://github.com/user/skills
+agentkit doctor
 ```
+
+---
+
+## ⚙️ Configuration
+
+### Default Repository
+
+Set `AGENTKIT_DEFAULT_REPO` to change the default repo for all commands:
+
+```bash
+# macOS / Linux — add to ~/.bashrc or ~/.zshrc
+export AGENTKIT_DEFAULT_REPO=https://github.com/your-org/your-repo
+
+# Windows PowerShell
+$env:AGENTKIT_DEFAULT_REPO = "https://github.com/your-org/your-repo"
+```
+
+Once set, `agentkit list agents` uses your repo without any flags.
+
+### Repo Cache
+
+Cloned repos are cached at `~/.cache/agentkit/` keyed by URL and branch. On subsequent runs the CLI does a `git fetch --depth=1` + `git reset` instead of a full clone. Use `--no-cache` to force a fresh clone.
+
+### Scope: Global vs Local
+
+`--scope global` (default) installs to `~/.claude/<type>/` — available in all Claude sessions.  
+`--scope local` installs to `.claude/<type>/` in the current working directory — project-only.
+
+---
 
 ## 🔗 Supported Repository URL Formats
 
@@ -269,55 +339,58 @@ skills-cli sync --repo https://github.com/user/skills
 | SSH | `git@github.com:user/skills.git` |
 | Self-hosted | `https://git.company.com/team/skills` |
 
+## 🗂️ Supported Artifact Conventions
+
+The CLI auto-detects common layout conventions used in the wild:
+
+| Type | Layout | Marker |
+|------|--------|--------|
+| `skills` | `skills/<name>/SKILL.md` | `SKILL.md` |
+| `commands` | `commands/<name>/COMMAND.md` | `COMMAND.md` |
+| `agents` | `agents/<name>/AGENT.md` **or** `agents/<name>.agent.md` | `AGENT.md` / `.agent.md` |
+| `plugins` | `plugins/<name>/PLUGIN.md` **or** `plugins/<name>/plugin.json` | `PLUGIN.md` / `plugin.json` |
+
 ## 🏗️ Architecture
 
-The CLI is organized as a Python package with a clean separation between core logic and CLI handling:
-
 ```
-skills-cli/
-├── skills_cli/
-│   ├── __init__.py      # Public API exports
-│   ├── core.py          # Core library (git, clone, discover, install, pack)
-│   └── cli.py           # CLI handlers (argparse, command functions)
+agentkit/           ← repo root
+├── agentkit/         ← Python package
+│   ├── __init__.py   # Public API exports
+│   ├── core.py       # Core library (git, clone, discover, install, pack)
+│   └── cli.py        # CLI handlers (argparse, command functions)
 ├── tests/
-│   └── test_core.py     # Unit tests
-├── skills_cli.py        # Entry point
+│   └── test_core.py  # Unit tests
 └── pyproject.toml
 ```
 
 ### 🐍 Python API
 
-The core functions can be imported and used programmatically:
-
 ```python
-from skills_cli import (
+from agentkit import (
     parse_repo_url,
-    discover_skills,
-    find_skills_root,
-    install_skill,
-    validate_skill_md,
-    get_claude_skills_dir,
+    discover_artifacts,
+    find_artifacts_root,
+    install_artifact,
+    validate_artifact_md,
+    get_claude_artifacts_dir,
+    get_repo_cache_dir,
 )
 
 # Parse various repo URL formats
 repo_info = parse_repo_url("https://github.com/user/skills/tree/main/skills")
-# {'clone_url': '...', 'branch': 'main', 'subdir': 'skills', ...}
 
-# Discover skills in a directory
-skills = discover_skills(Path("~/.claude/skills").expanduser())
-# [{'name': 'pdf', 'description': '...', 'path': Path(...), ...}, ...]
+# Discover artifacts in a directory
+agents = discover_artifacts(Path("~/.claude/agents").expanduser(), artifact_type="agents")
 
-# Install a skill
-success, message = install_skill(
-    source_path,
-    target_dir,
-    force=True,
-    backup=True
-)
+# Install an artifact
+success, message = install_artifact(source_path, target_dir, artifact_type="skills", force=True)
 
-# Validate a skill
-issues = validate_skill_md(Path("./my-skill"))
-# [] if valid, or ['Missing required field: name', ...] if issues
+# Validate an artifact
+issues = validate_artifact_md(Path("./my-skill"), artifact_type="skills")
+
+# Get install directory
+global_dir = get_claude_artifacts_dir(artifact_type="skills", scope="personal")
+project_dir = get_claude_artifacts_dir(artifact_type="agents", scope="project")
 ```
 
 ## 📋 Requirements
@@ -328,19 +401,15 @@ issues = validate_skill_md(Path("./my-skill"))
 ## 🧑‍💻 Development
 
 ```bash
-# Clone the repository
-git clone https://github.com/kcchien/skills-cli.git
-cd skills-cli
-
-# Install in development mode
+git clone https://github.com/dtPaTh/agentkit.git
+cd agentkit
 pip install -e ".[dev]"
-
-# Run tests
 pytest tests/ -v
-
-# Run a specific test
-pytest tests/test_core.py::TestParseRepoUrl -v
 ```
+
+## 🙏 Credits
+
+AgentKit is a fork of [skills-cli](https://github.com/kcchien/skills-cli) originally created by [KC Chien](https://github.com/kcchien). The core architecture, git integration, and artifact discovery logic are built on their work.
 
 ## 📄 License
 
