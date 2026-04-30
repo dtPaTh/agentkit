@@ -557,13 +557,40 @@ def parse_artifact_md(marker_md: Path, artifact_type: str = "skills") -> dict:
         parts = content.split("---", 2)
         if len(parts) >= 3:
             frontmatter = parts[1].strip()
-            for line in frontmatter.split("\n"):
+            lines = frontmatter.split("\n")
+            block_key = None
+            block_style = None
+            block_lines = []
+            for line in lines:
+                if block_key:
+                    if line and (line[0] == " " or line[0] == "\t"):
+                        block_lines.append(line.strip())
+                        continue
+                    else:
+                        # end of block scalar — commit collected value
+                        if block_style == ">":
+                            result[block_key] = " ".join(block_lines).strip()
+                        else:
+                            result[block_key] = "\n".join(block_lines).strip()
+                        block_key = None
+                        block_style = None
+                        block_lines = []
                 if ":" in line:
                     key, value = line.split(":", 1)
                     key = key.strip().lower()
                     value = value.strip().strip('"').strip("'")
                     if key in ("name", "description"):
-                        result[key] = value
+                        if value in (">", "|", ">-", "|-", ">+", "|+"):
+                            block_key = key
+                            block_style = value[0]
+                            block_lines = []
+                        else:
+                            result[key] = value
+            if block_key and block_lines:
+                if block_style == ">":
+                    result[block_key] = " ".join(block_lines).strip()
+                else:
+                    result[block_key] = "\n".join(block_lines).strip()
 
     return result
 
