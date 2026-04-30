@@ -272,7 +272,8 @@ def cmd_installed(args):
                 scopes_to_show.append(("global", global_dir, global_artifacts))
 
     project_dir = get_claude_artifacts_dir(artifact_type=artifact_type, scope="project")
-    if project_dir.exists():
+    global_dir_check = get_claude_artifacts_dir(artifact_type=artifact_type, scope="personal")
+    if project_dir != global_dir_check and project_dir.exists():
         project_artifacts = discover_artifacts(project_dir, artifact_type=artifact_type)
         if project_artifacts:
             scopes_to_show.append(("project", project_dir, project_artifacts))
