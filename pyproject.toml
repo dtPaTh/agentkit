@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentkit"
-version = "0.3.2"
+version = "0.4.0"
 description = "Cross-platform CLI for managing Claude Code and Claude Desktop artifacts"
 readme = "README.md"
 license = { text = "MIT" }

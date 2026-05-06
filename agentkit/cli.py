@@ -442,10 +442,20 @@ def cmd_install(args):
         target_dir.mkdir(parents=True, exist_ok=True)
 
     installed = 0
+    skipped_external = 0
     for artifact in artifacts_to_install:
         artifact_name = artifact.get("name") or artifact["folder_name"]
+        artifact_path = artifact.get("path")
+        if artifact_path is None or not Path(artifact_path).exists():
+            source_kind = artifact.get("source_kind", "external")
+            log_warning(
+                f"{artifact_name}: external plugin (source: {source_kind}), "
+                f"not bundled in this repo — install from upstream instead"
+            )
+            skipped_external += 1
+            continue
         success, message = install_artifact(
-            artifact["path"],
+            artifact_path,
             target_dir,
             artifact_type=artifact_type,
             repo_info=repo_info,
@@ -468,6 +478,8 @@ def cmd_install(args):
         log_info(f"[DRY RUN] Would install {installed}/{len(artifacts_to_install)} {label_plural} to {target_dir}")
     else:
         log_success(f"Installed {installed}/{len(artifacts_to_install)} {label_plural} to {target_dir}")
+    if skipped_external:
+        log_info(f"Skipped {skipped_external} external {label_plural} (hosted in upstream repos)")
     return 0
 
 
@@ -503,8 +515,17 @@ def cmd_pack(args):
 
     log_info(f"Packing {len(artifacts_to_pack)} {label_plural} to {output_dir}")
 
+    packed_artifacts = []
     for artifact in artifacts_to_pack:
-        pack_artifact(artifact["path"], output_dir)
+        artifact_path = artifact.get("path")
+        artifact_name = artifact.get("name") or artifact["folder_name"]
+        if artifact_path is None or not Path(artifact_path).exists():
+            source_kind = artifact.get("source_kind", "external")
+            log_warning(f"{artifact_name}: external {label_plural[:-1]} (source: {source_kind}) — skipping")
+            continue
+        pack_artifact(artifact_path, output_dir)
+        packed_artifacts.append(artifact)
+    artifacts_to_pack = packed_artifacts
 
     print()
     log_success(f"Packed {len(artifacts_to_pack)} {label_plural}")
@@ -548,8 +569,15 @@ def cmd_sync(args):
         log_warning(f"No {label_plural} found in repository")
         return 1
 
+    skipped_external = 0
     for artifact in artifacts:
-        artifact_path = artifact["path"]
+        artifact_path = artifact.get("path")
+        artifact_name = artifact.get("name") or artifact["folder_name"]
+        if artifact_path is None or not Path(artifact_path).exists():
+            source_kind = artifact.get("source_kind", "external")
+            log_warning(f"{artifact_name}: external {label_plural[:-1]} (source: {source_kind}) — skipping")
+            skipped_external += 1
+            continue
         dest = target_dir / artifact_path.name
         if dest.exists():
             shutil.rmtree(dest) if dest.is_dir() else dest.unlink()
@@ -559,7 +587,9 @@ def cmd_sync(args):
             shutil.copytree(artifact_path, dest)
         log_success(f"Synced: {artifact_path.name}")
 
-        log_success(f"{label_plural.title()} synced to {target_dir}")
+    log_success(f"{label_plural.title()} synced to {target_dir}")
+    if skipped_external:
+        log_info(f"Skipped {skipped_external} external {label_plural} (hosted in upstream repos)")
 
     _, artifacts = find_artifacts_root(target_dir, artifact_type=artifact_type)
     if artifacts:
@@ -587,7 +617,12 @@ def cmd_validate(args):
         total_issues = 0
         for artifact in artifacts_to_validate:
             artifact_name = artifact.get("name") or artifact["folder_name"]
-            issues = validate_artifact_md(artifact["path"], artifact_type=artifact_type)
+            artifact_path = artifact.get("path")
+            if artifact_path is None or not Path(artifact_path).exists():
+                source_kind = artifact.get("source_kind", "external")
+                print(f"  {Colors.YELLOW}○{Colors.RESET} {artifact_name} (external: {source_kind}) — skipped")
+                continue
+            issues = validate_artifact_md(artifact_path, artifact_type=artifact_type)
 
             if issues:
                 print(f"  {Colors.RED}✗{Colors.RESET} {Colors.BOLD}{artifact_name}{Colors.RESET}")

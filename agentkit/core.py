@@ -92,12 +92,15 @@ ARTIFACT_CONFIG = {
         "label_plural": "plugins",
         "marker": "PLUGIN.md",
         "alt_markers": ["plugin.json"],
+        "nested_marker_dirs": [".claude-plugin"],
+        "marketplace_manifest": ".claude-plugin/marketplace.json",
         "required_fields": ["name", "description"],
         "common_dirs": [
             "plugins",
             ".claude/plugins",
             "claude/plugins",
             "src/plugins",
+            "external_plugins",
         ],
     },
 }
@@ -409,21 +412,53 @@ def read_artifact_metadata(artifact_dir: Path) -> Optional[dict]:
 # Skill Discovery and Parsing
 # =============================================================================
 
+def _find_marker_in_folder(folder: Path, config: dict) -> Optional[Path]:
+    """Locate the marker file inside an artifact folder.
+
+    Search order:
+      1. Primary marker directly in folder (e.g. PLUGIN.md)
+      2. Alt markers directly in folder (e.g. plugin.json)
+      3. Alt markers inside nested marker dirs (e.g. .claude-plugin/plugin.json)
+    """
+    marker_file = config["marker"]
+    alt_markers = config.get("alt_markers", [])
+    nested_dirs = config.get("nested_marker_dirs", [])
+
+    primary = folder / marker_file
+    if primary.exists():
+        return primary
+
+    for alt in alt_markers:
+        candidate = folder / alt
+        if candidate.exists():
+            return candidate
+
+    for nested in nested_dirs:
+        nested_dir = folder / nested
+        if not nested_dir.is_dir():
+            continue
+        for alt in alt_markers:
+            candidate = nested_dir / alt
+            if candidate.exists():
+                return candidate
+
+    return None
+
+
 def discover_artifacts(artifacts_dir: Path, artifact_type: str = "skills") -> list[dict]:
     """
     Discover all artifacts of a type in a directory.
 
-    Supports three layouts:
+    Supports four layouts:
       - Subdirectory with primary marker (e.g. SKILL.md)
       - Subdirectory with alternative marker (e.g. plugin.json)
+      - Subdirectory with marker inside a nested dir (e.g. .claude-plugin/plugin.json)
       - Flat files matching a suffix (e.g. .agent.md)
 
     Returns:
         Each artifact is a dict containing path, folder_name, name, description
     """
     config = get_artifact_config(artifact_type)
-    marker_file = config["marker"]
-    alt_markers = config.get("alt_markers", [])
     flat_file_suffix = config.get("flat_file_suffix")
     artifacts = []
 
@@ -432,15 +467,9 @@ def discover_artifacts(artifacts_dir: Path, artifact_type: str = "skills") -> li
 
     for item in artifacts_dir.iterdir():
         if item.is_dir():
-            marker_path = item / marker_file
-            if not marker_path.exists():
-                for alt in alt_markers:
-                    candidate = item / alt
-                    if candidate.exists():
-                        marker_path = candidate
-                        break
-                else:
-                    continue
+            marker_path = _find_marker_in_folder(item, config)
+            if marker_path is None:
+                continue
             artifact_info = parse_artifact_md(marker_path, artifact_type=artifact_type)
             artifact_info["path"] = item
             artifact_info["folder_name"] = item.name
@@ -457,11 +486,20 @@ def discover_artifacts(artifacts_dir: Path, artifact_type: str = "skills") -> li
     return sorted(artifacts, key=lambda x: x.get("name", x["folder_name"]))
 
 
+def _artifact_folder_from_marker(marker_path: Path, config: dict) -> Path:
+    """Resolve the artifact folder from a marker path, hopping over nested marker dirs."""
+    nested_dirs = set(config.get("nested_marker_dirs", []))
+    if marker_path.parent.name in nested_dirs:
+        return marker_path.parent.parent
+    return marker_path.parent
+
+
 def find_artifacts_root(repo_root: Path, artifact_type: str = "skills", quiet: bool = False) -> tuple[Path, list[dict]]:
     """
     Find the artifact root directory in a repo.
 
     Search order:
+        0. Marketplace manifest (e.g. .claude-plugin/marketplace.json) — for plugins
         1. Root directory itself
         2. Common subdirectory names
         3. Recursive search for directories containing marker files
@@ -471,11 +509,23 @@ def find_artifacts_root(repo_root: Path, artifact_type: str = "skills", quiet: b
     """
     config = get_artifact_config(artifact_type)
     marker_file = config["marker"]
+    alt_markers = config.get("alt_markers", [])
+    nested_dirs = config.get("nested_marker_dirs", [])
     common_dirs = config["common_dirs"]
+    manifest_rel = config.get("marketplace_manifest")
 
     def _info(msg: str) -> None:
         if not quiet:
             log_info(msg)
+
+    # 0. Marketplace manifest (canonical for Claude Code plugins)
+    if manifest_rel:
+        manifest_path = repo_root / manifest_rel
+        if manifest_path.is_file():
+            marketplace_artifacts = discover_marketplace(repo_root, artifact_type=artifact_type)
+            if marketplace_artifacts:
+                _info(f"Loaded {len(marketplace_artifacts)} {config['label_plural']} from {manifest_rel}")
+                return repo_root, marketplace_artifacts
 
     # 1. Try root directory first
     artifacts = discover_artifacts(repo_root, artifact_type=artifact_type)
@@ -492,19 +542,27 @@ def find_artifacts_root(repo_root: Path, artifact_type: str = "skills", quiet: b
                 return candidate, artifacts
 
     # 3. Search for marker files (up to 3 levels deep)
-    marker_files = []
+    marker_files: list[Path] = []
+    glob_targets: list[str] = [marker_file] + list(alt_markers)
+    nested_targets: list[str] = [f"{nested}/{alt}" for nested in nested_dirs for alt in alt_markers]
+
     for depth in range(1, 4):
-        pattern = "/".join(["*"] * depth) + f"/{marker_file}"
-        marker_files.extend(repo_root.glob(pattern))
+        depth_prefix = "/".join(["*"] * depth)
+        for target in glob_targets:
+            marker_files.extend(repo_root.glob(f"{depth_prefix}/{target}"))
+        for target in nested_targets:
+            marker_files.extend(repo_root.glob(f"{depth_prefix}/{target}"))
         if marker_files:
             break
 
     if marker_files:
-        parents = set()
+        # Deduplicate (a folder might match both PLUGIN.md and plugin.json)
+        seen_folders: dict[Path, Path] = {}
         for marker_path in marker_files:
-            artifact_folder = marker_path.parent
-            artifacts_root = artifact_folder.parent
-            parents.add(artifacts_root)
+            artifact_folder = _artifact_folder_from_marker(marker_path, config)
+            seen_folders.setdefault(artifact_folder, marker_path)
+
+        parents = {folder.parent for folder in seen_folders}
 
         if len(parents) == 1:
             artifacts_root = parents.pop()
@@ -514,19 +572,96 @@ def find_artifacts_root(repo_root: Path, artifact_type: str = "skills", quiet: b
             artifacts = discover_artifacts(artifacts_root, artifact_type=artifact_type)
             if artifacts:
                 return artifacts_root, artifacts
-        else:
-            _info(f"Found {config['label_plural']} in multiple directories")
-            all_artifacts = []
-            for marker_path in marker_files:
-                artifact_folder = marker_path.parent
-                artifact_info = parse_artifact_md(marker_path, artifact_type=artifact_type)
-                artifact_info["path"] = artifact_folder
-                artifact_info["folder_name"] = artifact_folder.name
-                all_artifacts.append(artifact_info)
-            if all_artifacts:
-                return repo_root, sorted(all_artifacts, key=lambda x: x.get("name", x["folder_name"]))
+
+        _info(f"Found {config['label_plural']} in multiple directories")
+        all_artifacts = []
+        for artifact_folder, marker_path in seen_folders.items():
+            artifact_info = parse_artifact_md(marker_path, artifact_type=artifact_type)
+            artifact_info["path"] = artifact_folder
+            artifact_info["folder_name"] = artifact_folder.name
+            all_artifacts.append(artifact_info)
+        if all_artifacts:
+            return repo_root, sorted(all_artifacts, key=lambda x: x.get("name", x["folder_name"]))
 
     return repo_root, []
+
+
+# =============================================================================
+# Marketplace Discovery (Claude Code plugin marketplace)
+# =============================================================================
+
+def discover_marketplace(repo_root: Path, artifact_type: str = "plugins") -> list[dict]:
+    """
+    Parse a Claude Code marketplace manifest into artifact entries.
+
+    Each plugin entry in marketplace.json has a `source` describing where it lives:
+      - String form like "./plugins/foo"  -> resolves to a local folder in this repo
+      - Object form with "source": "git-subdir" / "url" / "github" -> external repo
+
+    Returns a list of artifact dicts compatible with the rest of the discovery
+    pipeline. Externally-hosted plugins get path=None and source_kind set so
+    callers (install/sync/pack) can skip them gracefully.
+    """
+    config = get_artifact_config(artifact_type)
+    manifest_rel = config.get("marketplace_manifest")
+    if not manifest_rel:
+        return []
+
+    manifest_path = repo_root / manifest_rel
+    if not manifest_path.is_file():
+        return []
+
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+
+    plugins = data.get("plugins") or []
+    artifacts: list[dict] = []
+
+    for entry in plugins:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        if not name:
+            continue
+        description = entry.get("description")
+        source = entry.get("source")
+
+        local_path: Optional[Path] = None
+        source_kind = "unknown"
+        source_info: Optional[dict] = None
+
+        if isinstance(source, str):
+            source_kind = "local"
+            relative = source.lstrip("./").replace("\\", "/")
+            candidate = (repo_root / relative).resolve()
+            try:
+                candidate.relative_to(repo_root.resolve())
+            except ValueError:
+                candidate = None
+            if candidate and candidate.is_dir():
+                local_path = candidate
+        elif isinstance(source, dict):
+            source_kind = source.get("source") or "unknown"
+            source_info = source
+            sub_path = source.get("path")
+            if sub_path and source_kind in ("git-subdir", "github"):
+                rel = sub_path.lstrip("./").replace("\\", "/")
+                candidate = (repo_root / rel)
+                if candidate.is_dir():
+                    local_path = candidate
+
+        artifacts.append({
+            "name": name,
+            "description": description,
+            "path": local_path,
+            "folder_name": name,
+            "source_kind": source_kind,
+            "source": source_info if source_info is not None else source,
+        })
+
+    return sorted(artifacts, key=lambda x: x["name"].lower())
 
 
 def parse_artifact_md(marker_md: Path, artifact_type: str = "skills") -> dict:
