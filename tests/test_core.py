@@ -5,8 +5,11 @@ These tests ensure the core logic works correctly before and after refactoring.
 Run with: python -m pytest tests/ -v
 """
 
+import argparse
+import json
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from agentkit import (
     parse_repo_url,
@@ -428,6 +431,168 @@ class TestArtifactPaths:
         commands_dir = get_claude_artifacts_dir("commands", scope="project")
         assert commands_dir.name == "commands"
         assert commands_dir.parent.name == ".claude"
+
+
+class TestCmdUpdate:
+    """Tests for cmd_update CLI command."""
+
+    def _make_installed_skill(self, target: Path, name: str, meta: dict | None = None) -> Path:
+        """Create a fake installed skill directory with optional .agentkit.json metadata."""
+        skill_dir = target / name
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: Test skill\n---\nContent"
+        )
+        if meta is not None:
+            (skill_dir / ".agentkit.json").write_text(json.dumps(meta))
+        return skill_dir
+
+    def _base_args(self, target: str, **overrides) -> argparse.Namespace:
+        defaults = dict(
+            items=None, all=True, scope="global", project=False,
+            target=target, backup=False, dry_run=False,
+            no_cache=False, type="skills",
+        )
+        defaults.update(overrides)
+        return argparse.Namespace(**defaults)
+
+    _SOURCE_META = {
+        "source_url": "https://github.com/org/repo/tree/main/skills",
+        "clone_url": "https://github.com/org/repo.git",
+        "branch": "main",
+        "commit": "abc1234",
+        "installed_at": "2024-01-01T00:00:00",
+        "installed_by": "agentkit",
+    }
+
+    def _make_upstream(self, tmp: Path, *names: str) -> Path:
+        """Build a fake upstream skills directory with the given skill names."""
+        for name in names:
+            d = tmp / name
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "SKILL.md").write_text(
+                f"---\nname: {name}\ndescription: Updated\n---\nNew content"
+            )
+        return tmp
+
+    def test_update_skips_artifacts_without_metadata(self, capsys):
+        """Artifacts installed without .agentkit.json are warned and skipped."""
+        from agentkit.cli import cmd_update
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            self._make_installed_skill(target, "no-meta-skill")  # no meta
+
+            result = cmd_update(self._base_args(str(target)))
+
+        assert result == 0
+        assert "no-meta-skill" in capsys.readouterr().out
+
+    def test_update_all_with_metadata(self, capsys):
+        """Update all artifacts that have metadata re-installs from upstream."""
+        from agentkit.cli import cmd_update
+
+        with tempfile.TemporaryDirectory() as target_tmp, \
+             tempfile.TemporaryDirectory() as upstream_tmp, \
+             tempfile.TemporaryDirectory() as cache_tmp:
+
+            target = Path(target_tmp)
+            self._make_installed_skill(target, "my-skill", meta=self._SOURCE_META)
+            upstream = self._make_upstream(Path(upstream_tmp), "my-skill")
+
+            with patch("agentkit.cli.get_repo_cache_dir", return_value=Path(cache_tmp)), \
+                 patch("agentkit.cli.clone_repo", return_value=upstream), \
+                 patch("agentkit.cli.get_git_commit_hash", return_value="newdead"):
+                result = cmd_update(self._base_args(str(target)))
+
+        assert result == 0
+        assert "my-skill" in capsys.readouterr().out
+
+    def test_update_filters_by_items(self, capsys):
+        """--items restricts which installed artifacts are updated."""
+        from agentkit.cli import cmd_update
+
+        with tempfile.TemporaryDirectory() as target_tmp, \
+             tempfile.TemporaryDirectory() as upstream_tmp, \
+             tempfile.TemporaryDirectory() as cache_tmp:
+
+            target = Path(target_tmp)
+            self._make_installed_skill(target, "skill-a", meta=self._SOURCE_META)
+            self._make_installed_skill(target, "skill-b", meta=self._SOURCE_META)
+            upstream = self._make_upstream(Path(upstream_tmp), "skill-a", "skill-b")
+
+            with patch("agentkit.cli.get_repo_cache_dir", return_value=Path(cache_tmp)), \
+                 patch("agentkit.cli.clone_repo", return_value=upstream), \
+                 patch("agentkit.cli.get_git_commit_hash", return_value="newdead"):
+                result = cmd_update(self._base_args(str(target), items="skill-a", all=False))
+
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "skill-a" in out
+        assert "skill-b" not in out
+
+    def test_update_warns_when_not_found_upstream(self, capsys):
+        """Artifacts missing from the upstream repo are warned and skipped."""
+        from agentkit.cli import cmd_update
+
+        with tempfile.TemporaryDirectory() as target_tmp, \
+             tempfile.TemporaryDirectory() as upstream_tmp, \
+             tempfile.TemporaryDirectory() as cache_tmp:
+
+            target = Path(target_tmp)
+            self._make_installed_skill(target, "removed-skill", meta=self._SOURCE_META)
+            upstream = Path(upstream_tmp)  # empty — artifact not present upstream
+
+            with patch("agentkit.cli.get_repo_cache_dir", return_value=Path(cache_tmp)), \
+                 patch("agentkit.cli.clone_repo", return_value=upstream), \
+                 patch("agentkit.cli.get_git_commit_hash", return_value="abc"):
+                result = cmd_update(self._base_args(str(target)))
+
+        assert result == 0
+        assert "removed-skill" in capsys.readouterr().out
+
+    def test_update_dry_run_does_not_modify_files(self):
+        """--dry-run shows a preview without changing installed artifact content."""
+        from agentkit.cli import cmd_update
+
+        with tempfile.TemporaryDirectory() as target_tmp, \
+             tempfile.TemporaryDirectory() as upstream_tmp, \
+             tempfile.TemporaryDirectory() as cache_tmp:
+
+            target = Path(target_tmp)
+            self._make_installed_skill(target, "dry-skill", meta=self._SOURCE_META)
+            upstream = self._make_upstream(Path(upstream_tmp), "dry-skill")
+
+            original = (target / "dry-skill" / "SKILL.md").read_text()
+
+            with patch("agentkit.cli.get_repo_cache_dir", return_value=Path(cache_tmp)), \
+                 patch("agentkit.cli.clone_repo", return_value=upstream), \
+                 patch("agentkit.cli.get_git_commit_hash", return_value="newdead"):
+                result = cmd_update(self._base_args(str(target), dry_run=True))
+
+            assert result == 0
+            assert (target / "dry-skill" / "SKILL.md").read_text() == original
+
+    def test_update_no_items_selected_returns_zero(self, capsys):
+        """Passing --items that matches no installed artifact returns an error."""
+        from agentkit.cli import cmd_update
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            self._make_installed_skill(target, "existing-skill", meta=self._SOURCE_META)
+
+            result = cmd_update(self._base_args(str(target), items="nonexistent", all=False))
+
+        assert result == 1
+
+    def test_update_empty_install_dir_returns_zero(self, capsys):
+        """An install directory with no artifacts exits cleanly."""
+        from agentkit.cli import cmd_update
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = cmd_update(self._base_args(tmp))
+
+        assert result == 0
 
 
 if __name__ == "__main__":

@@ -92,8 +92,7 @@ curl -fsSL https://raw.githubusercontent.com/dtPaTh/agentkit/main/install.sh | b
 irm https://raw.githubusercontent.com/dtPaTh/agentkit/main/install.ps1 | iex
 ```
 
-### From Source (pip)
-
+### From Source (pip
 ```bash
 git clone https://github.com/dtPaTh/agentkit.git
 cd agentkit
@@ -238,6 +237,42 @@ agentkit agents installed
 agentkit installed agents
 agentkit installed --type agents
 ```
+
+---
+
+### Update Artifacts
+
+`update` refreshes already-installed artifacts from their original source. It reads the `.agentkit.json` metadata written at install time to find the upstream URL — no need to remember where each artifact came from.
+
+```bash
+# Interactive selection from installed artifacts
+agentkit update
+
+# Update all installed skills
+agentkit update --all
+
+# Update specific artifacts by name
+agentkit update --items my-skill,other-skill
+
+# Update all installed agents — three equivalent forms
+agentkit agents update --all
+agentkit update agents --all
+agentkit update --type agents --all
+
+# Update project-local artifacts
+agentkit update --all --scope local
+
+# Backup before overwriting
+agentkit update --all --backup
+
+# Preview what would be updated without changing anything
+agentkit update --all --dry-run
+
+# Force a fresh upstream fetch instead of using cache
+agentkit update --all --no-cache
+```
+
+> **Note:** `update` only works for artifacts installed via `agentkit install`. Artifacts copied in manually or via `agentkit sync` have no source metadata and will be skipped with a warning.
 
 ---
 

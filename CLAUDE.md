@@ -25,6 +25,7 @@ agentkit/
 - `agentkit install [URL]` - Install artifacts from a repository
 - `agentkit installed` - List locally installed artifacts
 - `agentkit remove` - Remove installed artifacts
+- `agentkit update` - Update installed artifacts to their latest upstream version
 - `agentkit sync [URL]` - Sync artifacts from a repository
 - `agentkit pack [URL]` - Pack artifacts into zip files
 - `agentkit validate` - Validate artifacts format

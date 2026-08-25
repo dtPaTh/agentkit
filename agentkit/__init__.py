@@ -15,7 +15,7 @@ CLI Entry Point:
     - main: CLI main function
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 from .core import (
     # Constants
@@ -38,6 +38,7 @@ from .core import (
     # Git Operations
     run_git,
     get_git_commit_hash,
+    get_remote_head_commit,
     detect_default_branch,
     clone_repo,
 
@@ -93,6 +94,7 @@ __all__ = [
     # Git Operations
     "run_git",
     "get_git_commit_hash",
+    "get_remote_head_commit",
     "detect_default_branch",
     "clone_repo",
 

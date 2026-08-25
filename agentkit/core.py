@@ -295,6 +295,22 @@ def get_git_commit_hash(repo_dir: Path) -> Optional[str]:
     return None
 
 
+def get_remote_head_commit(clone_url: str, branch: str) -> Optional[str]:
+    """Return the full SHA of a remote branch HEAD using git ls-remote (no clone needed)."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", clone_url, f"refs/heads/{branch}"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip().split()[0]
+    except Exception:
+        pass
+    return None
+
+
 def detect_default_branch(clone_url: str) -> str:
     """
     Auto-detect the default branch name of a remote repo.
@@ -676,6 +692,7 @@ def parse_artifact_md(marker_md: Path, artifact_type: str = "skills") -> dict:
     result = {
         "name": None,
         "description": None,
+        "version": None,
     }
 
     if marker_md.suffix == ".json":
@@ -684,6 +701,8 @@ def parse_artifact_md(marker_md: Path, artifact_type: str = "skills") -> dict:
             result["name"] = data.get("name")
             desc = data.get("description")
             result["description"] = str(desc).strip() if desc else None
+            ver = data.get("version")
+            result["version"] = str(ver).strip() if ver else None
         except (json.JSONDecodeError, ValueError):
             pass
         return result
@@ -714,7 +733,7 @@ def parse_artifact_md(marker_md: Path, artifact_type: str = "skills") -> dict:
                     key, value = line.split(":", 1)
                     key = key.strip().lower()
                     value = value.strip().strip('"').strip("'")
-                    if key in ("name", "description"):
+                    if key in ("name", "description", "version"):
                         if value in (">", "|", ">-", "|-", ">+", "|+"):
                             block_key = key
                             block_style = value[0]

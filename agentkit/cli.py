@@ -30,6 +30,7 @@ from .core import (
     clone_repo,
     get_repo_cache_dir,
     read_artifact_metadata,
+    get_remote_head_commit,
     discover_artifacts,
     find_artifacts_root,
     get_claude_artifacts_dir,
@@ -137,9 +138,19 @@ def format_artifacts_list(
                     source = metadata.get("source_url", "-")
                     branch = metadata.get("branch", "-")
                     commit = metadata.get("commit", "-")
+                    version = artifact.get("version") or "n/a"
                     if len(source) > 50:
                         source = source[:47] + "..."
-                    print(f"  {' ' * name_width}  {Colors.YELLOW}↳ {source} ({branch}@{commit}){Colors.RESET}")
+                    print(f"  {' ' * name_width}  {Colors.YELLOW}Version: {version} ({branch})  ↳ {source}{Colors.RESET}")
+
+                    is_outdated = artifact.get("_is_outdated")
+                    remote_commit = artifact.get("_remote_commit")
+                    if is_outdated is True:
+                        print(f"  {' ' * name_width}  {Colors.RED}⬆ Update available  (installed: {commit}  upstream: {remote_commit}){Colors.RESET}")
+                    elif is_outdated is False:
+                        print(f"  {' ' * name_width}  {Colors.GREEN}✓ Up to date{Colors.RESET}")
+                    elif is_outdated is None and "_is_outdated" in artifact:
+                        print(f"  {' ' * name_width}  {Colors.YELLOW}? Could not reach upstream{Colors.RESET}")
     else:
         print()
         for artifact in artifacts:
@@ -239,11 +250,30 @@ def cmd_list(args):
     return 0
 
 
+def enrich_artifacts_with_update_status(artifacts: list[dict]) -> None:
+    """Fetch remote HEAD for each artifact and annotate with update status in-place."""
+    for artifact in artifacts:
+        meta = read_artifact_metadata(artifact.get("path"))
+        if not meta or not meta.get("clone_url") or not meta.get("commit"):
+            continue
+        log_info(f"Checking {artifact.get('name') or artifact['folder_name']}...")
+        remote_sha = get_remote_head_commit(meta["clone_url"], meta.get("branch", "main"))
+        if remote_sha:
+            artifact["_remote_commit"] = remote_sha[:7]
+            artifact["_is_outdated"] = not remote_sha.startswith(meta["commit"])
+        else:
+            artifact["_remote_commit"] = None
+            artifact["_is_outdated"] = None  # could not reach upstream
+
+
 def cmd_installed(args):
     """installed command: List locally installed artifacts."""
     artifact_type = get_artifact_type(args)
     _, label_plural = get_artifact_labels(artifact_type)
     total_artifacts = 0
+
+    check_updates = getattr(args, "check_updates", False)
+    show_detail = args.detail or check_updates
 
     if args.target:
         target_dir = Path(args.target)
@@ -253,9 +283,11 @@ def cmd_installed(args):
 
         artifacts = discover_artifacts(target_dir, artifact_type=artifact_type)
         if artifacts:
+            if check_updates:
+                enrich_artifacts_with_update_status(artifacts)
             print(f"\n{Colors.BOLD}Installed {label_plural} (custom):{Colors.RESET}")
             print(f"  {Colors.YELLOW}Location: {target_dir}{Colors.RESET}")
-            format_artifacts_list(artifacts, detailed=args.detail, show_source=args.detail)
+            format_artifacts_list(artifacts, detailed=show_detail, show_source=show_detail)
             total_artifacts = len(artifacts)
         else:
             log_warning(f"No {label_plural} installed in {target_dir}")
@@ -286,10 +318,12 @@ def cmd_installed(args):
         return 0
 
     for scope, directory, artifacts in scopes_to_show:
+        if check_updates:
+            enrich_artifacts_with_update_status(artifacts)
         scope_label = f"[{scope.upper()}]"
         print(f"\n{Colors.BOLD}{scope_label} Installed {label_plural}:{Colors.RESET}")
         print(f"  {Colors.YELLOW}Location: {directory}{Colors.RESET}")
-        format_artifacts_list(artifacts, detailed=args.detail, show_source=args.detail)
+        format_artifacts_list(artifacts, detailed=show_detail, show_source=show_detail)
         total_artifacts += len(artifacts)
         print()
 
@@ -601,6 +635,145 @@ def cmd_sync(args):
     return 0
 
 
+def cmd_update(args):
+    """update command: Update installed artifacts to their latest upstream version."""
+    artifact_type = get_artifact_type(args)
+    _, label_plural = get_artifact_labels(artifact_type)
+
+    target_dir = get_claude_artifacts_dir(artifact_type=artifact_type, scope=get_scope(args))
+    if args.target:
+        target_dir = Path(args.target)
+
+    if not target_dir.exists():
+        log_error(f"No {label_plural} directory found: {target_dir}")
+        return 1
+
+    all_installed = discover_artifacts(target_dir, artifact_type=artifact_type)
+    if not all_installed:
+        log_warning(f"No {label_plural} installed in {target_dir}")
+        return 0
+
+    requested_items = getattr(args, "items", None)
+
+    if requested_items:
+        requested = set(n.strip().lower() for n in requested_items.split(","))
+        candidates = [
+            a for a in all_installed
+            if a["folder_name"].lower() in requested
+            or (a.get("name") and a["name"].lower() in requested)
+        ]
+        if not candidates:
+            log_error(f"No matching {label_plural} found: {requested_items}")
+            return 1
+    elif args.all:
+        candidates = all_installed
+    else:
+        candidates = interactive_select(all_installed, artifact_type=artifact_type)
+
+    if not candidates:
+        log_info(f"No {label_plural} selected")
+        return 0
+
+    # Filter to those with source metadata; warn on the rest
+    to_update = []
+    for artifact in candidates:
+        meta = read_artifact_metadata(artifact["path"])
+        if not meta or not meta.get("source_url"):
+            name = artifact.get("name") or artifact["folder_name"]
+            log_warning(f"{name}: no install metadata (.agentkit.json) — install via agentkit to enable updates")
+            continue
+        artifact["_meta"] = meta
+        to_update.append(artifact)
+
+    if not to_update:
+        log_warning(f"No updatable {label_plural} found")
+        return 0
+
+    # Group by source_url to batch repo fetches
+    groups: dict[str, list[dict]] = {}
+    for artifact in to_update:
+        url = artifact["_meta"]["source_url"]
+        groups.setdefault(url, []).append(artifact)
+
+    dry_run = getattr(args, "dry_run", False)
+    backup = getattr(args, "backup", False)
+
+    if dry_run:
+        print(f"\n{Colors.YELLOW}[DRY RUN] The following actions would be performed:{Colors.RESET}\n")
+
+    updated = 0
+    skipped = 0
+
+    for source_url, artifacts in groups.items():
+        repo_info = parse_repo_url(source_url)
+        force_refresh = getattr(args, "no_cache", False)
+        cache_dir = get_repo_cache_dir(repo_info)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            cloned_root = clone_repo(repo_info, cache_dir, force_refresh=force_refresh)
+        except Exception as e:
+            for artifact in artifacts:
+                name = artifact.get("name") or artifact["folder_name"]
+                log_error(f"{name}: failed to fetch source — {e}")
+                skipped += 1
+            continue
+
+        _, remote_artifacts = find_artifacts_root(cloned_root, artifact_type=artifact_type)
+        commit_hash = get_git_commit_hash(cache_dir)
+
+        remote_by_key: dict[str, dict] = {}
+        for ra in remote_artifacts:
+            remote_by_key[ra["folder_name"].lower()] = ra
+            if ra.get("name"):
+                remote_by_key[ra["name"].lower()] = ra
+
+        for artifact in artifacts:
+            artifact_name = artifact.get("name") or artifact["folder_name"]
+            remote = remote_by_key.get(artifact["folder_name"].lower()) or remote_by_key.get(
+                (artifact.get("name") or "").lower()
+            )
+            if not remote:
+                log_warning(f"{artifact_name}: not found in upstream — skipping")
+                skipped += 1
+                continue
+
+            artifact_path = remote.get("path")
+            if artifact_path is None or not Path(artifact_path).exists():
+                log_warning(f"{artifact_name}: external artifact — skipping")
+                skipped += 1
+                continue
+
+            success, message = install_artifact(
+                artifact_path,
+                target_dir,
+                artifact_type=artifact_type,
+                repo_info=repo_info,
+                commit_hash=commit_hash,
+                force=True,
+                backup=backup,
+                dry_run=dry_run,
+            )
+            if success:
+                if dry_run:
+                    print(f"  {Colors.CYAN}-{Colors.RESET} {artifact_name}: {message}")
+                else:
+                    log_success(f"{artifact_name}: {message}")
+                updated += 1
+            else:
+                log_warning(f"{artifact_name}: {message}")
+                skipped += 1
+
+    print()
+    if dry_run:
+        log_info(f"[DRY RUN] Would update {updated}/{len(to_update)} {label_plural}")
+    else:
+        log_success(f"Updated {updated}/{len(to_update)} {label_plural}")
+    if skipped:
+        log_info(f"Skipped {skipped} {label_plural}")
+    return 0
+
+
 def cmd_validate(args):
     """validate command: Validate artifact marker format."""
     artifact_type = get_artifact_type(args)
@@ -730,6 +903,37 @@ def cmd_doctor(args):
     if not backup_dirs:
         print(f"    {Colors.GREEN}✓{Colors.RESET} No backup directories")
 
+    if getattr(args, "check_updates", False):
+        print(f"\n  {Colors.CYAN}Checking for available updates...{Colors.RESET}")
+        all_installed = []
+        for artifacts_dir in [global_dir, project_dir]:
+            if artifacts_dir.exists():
+                all_installed.extend(discover_artifacts(artifacts_dir, artifact_type=artifact_type))
+
+        outdated = []
+        no_meta = []
+        for artifact in all_installed:
+            name = artifact.get("name") or artifact["folder_name"]
+            meta = read_artifact_metadata(artifact.get("path"))
+            if not meta or not meta.get("clone_url") or not meta.get("commit"):
+                no_meta.append(name)
+                print(f"    {Colors.YELLOW}○{Colors.RESET} {name}: no install metadata — skipped")
+                continue
+            remote_sha = get_remote_head_commit(meta["clone_url"], meta.get("branch", "main"))
+            if remote_sha is None:
+                print(f"    {Colors.YELLOW}?{Colors.RESET} {name}: could not reach upstream")
+                warnings.append(f"{name}: upstream unreachable during update check")
+            elif not remote_sha.startswith(meta["commit"]):
+                remote_short = remote_sha[:7]
+                print(f"    {Colors.RED}⬆{Colors.RESET} {name}: update available  (installed: {meta['commit']}  upstream: {remote_short})")
+                outdated.append(name)
+                warnings.append(f"{name}: update available (run: agentkit update --items {artifact['folder_name']})")
+            else:
+                print(f"    {Colors.GREEN}✓{Colors.RESET} {name}: up to date ({meta['commit']})")
+
+        if not all_installed:
+            print(f"    {Colors.YELLOW}○{Colors.RESET} No installed {label_plural} found")
+
     print(f"\n{Colors.BOLD}Summary:{Colors.RESET}")
     if issues:
         print(f"  {Colors.RED}✗{Colors.RESET} {len(issues)} issues found")
@@ -775,7 +979,7 @@ def expand_typed_command_alias(argv: list[str]) -> list[str]:
         return argv
 
     match = re.match(
-        r"^(skills|commands|agents|plugins)-(list|installed|remove|install|pack|sync|validate|doctor)$",
+        r"^(skills|commands|agents|plugins)-(list|installed|remove|install|pack|sync|update|validate|doctor)$",
         argv[0],
     )
     if not match:
@@ -800,7 +1004,7 @@ def expand_resource_style_command(argv: list[str]) -> list[str]:
         "plugin": "plugins",
         "plugins": "plugins",
     }
-    verbs = {"list", "installed", "remove", "install", "pack", "sync", "validate", "doctor"}
+    verbs = {"list", "installed", "remove", "install", "pack", "sync", "update", "validate", "doctor"}
 
     resource = resource_aliases.get(argv[0].strip().lower())
     verb = argv[1].strip().lower()
@@ -853,6 +1057,7 @@ Examples:
   # Other commands
   agentkit installed --detail
   agentkit agents installed
+  agentkit update --all
   agentkit sync
   agentkit pack --output dist/desktop
   agentkit validate
@@ -909,7 +1114,9 @@ Examples:
                                   help="Show project artifacts (.claude/<type>/)")
     installed_parser.add_argument("--target", "-t", help="Custom artifact directory")
     installed_parser.add_argument("--detail", "-d", action="store_true",
-                                  help="Show detailed info (name and description)")
+                                  help="Show detailed info (name, description, version)")
+    installed_parser.add_argument("--check-updates", "-u", action="store_true",
+                                  help="Check each artifact against its upstream and show update status (implies --detail)")
     add_type_argument(installed_parser)
     installed_parser.set_defaults(func=cmd_installed)
 
@@ -1024,6 +1231,42 @@ Examples:
     sync_parser.add_argument("--no-cache", action="store_true", help="Force fresh clone, ignoring local cache")
     sync_parser.set_defaults(func=cmd_sync)
 
+    # Update command
+    update_parser = subparsers.add_parser(
+        "update",
+        help="Update installed artifacts to their latest upstream version",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Syntax:
+  agentkit <type> update [options]                 # <type> <verb>  (kubectl-style)
+  agentkit update <type> [options]                 # <verb> <type>
+  agentkit update --type <type> [options]          # flag form
+
+Examples:
+  agentkit update                                  # interactive, updates installed skills
+  agentkit update --all                            # update all installed skills
+  agentkit update --items my-skill,other-skill     # update specific skills
+  agentkit agents update --all                     # update all installed agents
+  agentkit update --all --backup                   # backup before overwriting
+  agentkit update --all --dry-run                  # preview what would be updated
+  agentkit update --all --no-cache                 # force fresh upstream fetch
+  agentkit update --all --scope local              # update project-local artifacts
+"""
+    )
+    add_items_argument(update_parser, action="update")
+    update_parser.add_argument("--all", "-a", action="store_true", help="Update all installed artifacts of selected type")
+    update_parser.add_argument("--scope", choices=["global", "local"], default="global",
+                               help="Config scope: global (~/.claude/) or local (.claude/ in project) (default: global)")
+    update_parser.add_argument("--project", "-p", action="store_true", help=argparse.SUPPRESS)
+    update_parser.add_argument("--target", "-t", help="Custom artifact directory")
+    update_parser.add_argument("--backup", action="store_true",
+                               help="Backup existing artifacts before overwriting")
+    update_parser.add_argument("--dry-run", action="store_true",
+                               help="Show what would be updated without actually updating")
+    add_type_argument(update_parser)
+    update_parser.add_argument("--no-cache", action="store_true", help="Force fresh clone, ignoring local cache")
+    update_parser.set_defaults(func=cmd_update)
+
     # Validate command
     validate_parser = subparsers.add_parser("validate", help="Validate artifact marker format")
     validate_parser.add_argument("--path", help="Path to artifact directory or marker file")
@@ -1037,6 +1280,8 @@ Examples:
     # Doctor command
     doctor_parser = subparsers.add_parser("doctor", help="Diagnose artifact directory issues")
     add_type_argument(doctor_parser)
+    doctor_parser.add_argument("--check-updates", "-u", action="store_true",
+                               help="Check each installed artifact against its upstream for available updates")
     doctor_parser.set_defaults(func=cmd_doctor)
 
     argv = expand_typed_command_alias(sys.argv[1:])
