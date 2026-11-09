@@ -1,5 +1,5 @@
 """
-Artifacts CLI - Cross-platform CLI for managing Claude Code artifacts
+Artifacts CLI - Cross-platform CLI for managing Claude Code and Qwen Code artifacts
 
 Public API:
     - parse_repo_url: Parse various Git repository URL formats
@@ -10,12 +10,14 @@ Public API:
     - install_skill: Install a skill to a directory
     - pack_skill: Pack a skill into a zip file
     - get_claude_skills_dir: Get Claude skills directory path
+    - get_artifacts_dir: Get an artifact directory for a target agent (claude, qwen)
+    - convert_artifact: Convert an artifact to a target agent's conventions
 
 CLI Entry Point:
     - main: CLI main function
 """
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 from .core import (
     # Constants
@@ -24,6 +26,9 @@ from .core import (
     COMMON_SKILL_DIRS,
     REQUIRED_SKILL_FIELDS,
     ARTIFACT_CONFIG,
+    DEFAULT_AGENT,
+    AGENT_CONFIG,
+    get_agent_config,
 
     # Logging
     Colors,
@@ -41,6 +46,7 @@ from .core import (
     get_remote_head_commit,
     detect_default_branch,
     clone_repo,
+    get_repo_cache_dir,
 
     # Metadata
     write_artifact_metadata,
@@ -57,6 +63,7 @@ from .core import (
     parse_skill_md,
 
     # Installation
+    get_artifacts_dir,
     get_claude_artifacts_dir,
     backup_artifact,
     install_artifact,
@@ -71,6 +78,8 @@ from .core import (
     validate_skill_md,
 )
 
+from .convert import Change, convert_artifact, summarize_changes
+
 from .cli import main
 
 __all__ = [
@@ -80,6 +89,9 @@ __all__ = [
     "COMMON_SKILL_DIRS",
     "REQUIRED_SKILL_FIELDS",
     "ARTIFACT_CONFIG",
+    "DEFAULT_AGENT",
+    "AGENT_CONFIG",
+    "get_agent_config",
 
     # Logging
     "Colors",
@@ -97,6 +109,7 @@ __all__ = [
     "get_remote_head_commit",
     "detect_default_branch",
     "clone_repo",
+    "get_repo_cache_dir",
 
     # Metadata
     "write_artifact_metadata",
@@ -113,6 +126,7 @@ __all__ = [
     "parse_skill_md",
 
     # Installation
+    "get_artifacts_dir",
     "get_claude_artifacts_dir",
     "backup_artifact",
     "install_artifact",
@@ -125,6 +139,11 @@ __all__ = [
     # Validation
     "validate_artifact_md",
     "validate_skill_md",
+
+    # Conversion
+    "Change",
+    "convert_artifact",
+    "summarize_changes",
 
     # CLI
     "main",

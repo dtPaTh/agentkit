@@ -33,11 +33,18 @@ from .core import (
     get_remote_head_commit,
     discover_artifacts,
     find_artifacts_root,
-    get_claude_artifacts_dir,
+    _find_marker_in_folder,
+    _artifact_folder_from_marker,
+    DEFAULT_AGENT,
+    AGENT_CONFIG,
+    get_agent_config,
+    get_artifacts_dir,
     install_artifact,
     pack_artifact,
     validate_artifact_md,
+    describe_markers,
 )
+from .convert import convert_artifact, summarize_changes
 
 
 # =============================================================================
@@ -104,6 +111,52 @@ def get_scope(args) -> str:
     scope_flag = getattr(args, "scope", "global") or "global"
     project_flag = getattr(args, "project", False)
     return "project" if (scope_flag == "local" or project_flag) else "personal"
+
+
+def get_agent(args) -> str:
+    """Resolve the target agent: --agent, else AGENTKIT_DEFAULT_AGENT, else claude."""
+    agent = (getattr(args, "agent", None) or DEFAULT_AGENT).strip().lower()
+    get_agent_config(agent)  # raises ValueError for unsupported agents
+    return agent
+
+
+def agent_artifacts_dir(args, artifact_type: str, scope: str) -> Path:
+    """Installation directory for the artifact type, scope and target agent from args."""
+    return get_artifacts_dir(artifact_type=artifact_type, scope=scope, agent=get_agent(args))
+
+
+_CHANGE_ICONS = {"rename": "→", "rewrite": "✎", "convert": "⇄", "create": "+", "warning": "⚠"}
+
+
+def convert_and_report(source_path: Path, target_dir: Path, artifact_type: str, agent: str,
+                       dry_run: bool = False) -> list:
+    """Convert an installed artifact to the agent's conventions and print what changed.
+
+    In dry-run mode nothing is installed, so the source is analysed without writing.
+    """
+    source_path = Path(source_path)
+    path = source_path if dry_run else target_dir / source_path.name
+    changes = convert_artifact(path, artifact_type, agent, dry_run=dry_run)
+    if changes:
+        verb = "would convert" if dry_run else "converted"
+        print(f"    {Colors.CYAN}↳ {verb} for {AGENT_CONFIG[agent]['label']}: "
+              f"{summarize_changes(changes)}{Colors.RESET}")
+        for change in changes:
+            color = Colors.YELLOW if change.kind == "warning" else ""
+            reset = Colors.RESET if color else ""
+            print(f"      {color}{_CHANGE_ICONS[change.kind]} {change.path}  {change.detail}{reset}")
+    return changes
+
+
+def print_conversion_summary(per_artifact: list[list], agent: str, label_plural: str, dry_run: bool = False) -> None:
+    """Print one aggregate line over all conversion reports of a command run."""
+    touched = [changes for changes in per_artifact if changes]
+    if not touched:
+        return
+    verb = "Would convert" if dry_run else "Converted"
+    flat = [change for changes in touched for change in changes]
+    log_info(f"{verb} {len(touched)} {label_plural} to {AGENT_CONFIG[agent]['label']} conventions: "
+             f"{summarize_changes(flat)}")
 
 
 def get_artifact_labels(artifact_type: str) -> tuple[str, str]:
@@ -297,14 +350,14 @@ def cmd_installed(args):
     scopes_to_show = []
 
     if not args.project:
-        global_dir = get_claude_artifacts_dir(artifact_type=artifact_type, scope="personal")
+        global_dir = agent_artifacts_dir(args, artifact_type, scope="personal")
         if global_dir.exists():
             global_artifacts = discover_artifacts(global_dir, artifact_type=artifact_type)
             if global_artifacts:
                 scopes_to_show.append(("global", global_dir, global_artifacts))
 
-    project_dir = get_claude_artifacts_dir(artifact_type=artifact_type, scope="project")
-    global_dir_check = get_claude_artifacts_dir(artifact_type=artifact_type, scope="personal")
+    project_dir = agent_artifacts_dir(args, artifact_type, scope="project")
+    global_dir_check = agent_artifacts_dir(args, artifact_type, scope="personal")
     if project_dir != global_dir_check and project_dir.exists():
         project_artifacts = discover_artifacts(project_dir, artifact_type=artifact_type)
         if project_artifacts:
@@ -336,7 +389,7 @@ def cmd_remove(args):
     artifact_type = get_artifact_type(args)
     label, label_plural = get_artifact_labels(artifact_type)
 
-    target_dir = get_claude_artifacts_dir(artifact_type=artifact_type, scope=get_scope(args))
+    target_dir = agent_artifacts_dir(args, artifact_type, scope=get_scope(args))
 
     if args.target:
         target_dir = Path(args.target)
@@ -426,7 +479,7 @@ def cmd_install(args):
     _, label_plural = get_artifact_labels(artifact_type)
     repo_info = prepare_repo_info(args)
 
-    target_dir = get_claude_artifacts_dir(artifact_type=artifact_type, scope=get_scope(args))
+    target_dir = agent_artifacts_dir(args, artifact_type, scope=get_scope(args))
 
     if args.target:
         target_dir = Path(args.target)
@@ -475,6 +528,8 @@ def cmd_install(args):
     if not dry_run:
         target_dir.mkdir(parents=True, exist_ok=True)
 
+    agent = get_agent(args)
+    conversions = []
     installed = 0
     skipped_external = 0
     for artifact in artifacts_to_install:
@@ -503,6 +558,7 @@ def cmd_install(args):
                 print(f"  {Colors.CYAN}-{Colors.RESET} {artifact_name}: {message}")
             else:
                 log_success(f"{artifact_name}: {message}")
+            conversions.append(convert_and_report(artifact_path, target_dir, artifact_type, agent, dry_run))
             installed += 1
         else:
             log_warning(f"{artifact_name}: {message}")
@@ -512,6 +568,7 @@ def cmd_install(args):
         log_info(f"[DRY RUN] Would install {installed}/{len(artifacts_to_install)} {label_plural} to {target_dir}")
     else:
         log_success(f"Installed {installed}/{len(artifacts_to_install)} {label_plural} to {target_dir}")
+    print_conversion_summary(conversions, agent, label_plural, dry_run)
     if skipped_external:
         log_info(f"Skipped {skipped_external} external {label_plural} (hosted in upstream repos)")
     return 0
@@ -588,7 +645,7 @@ def cmd_sync(args):
     _, label_plural = get_artifact_labels(artifact_type)
     repo_info = prepare_repo_info(args)
 
-    target_dir = get_claude_artifacts_dir(artifact_type=artifact_type, scope=get_scope(args))
+    target_dir = agent_artifacts_dir(args, artifact_type, scope=get_scope(args))
 
     if args.target:
         target_dir = Path(args.target)
@@ -603,6 +660,8 @@ def cmd_sync(args):
         log_warning(f"No {label_plural} found in repository")
         return 1
 
+    agent = get_agent(args)
+    conversions = []
     skipped_external = 0
     for artifact in artifacts:
         artifact_path = artifact.get("path")
@@ -620,8 +679,10 @@ def cmd_sync(args):
         else:
             shutil.copytree(artifact_path, dest)
         log_success(f"Synced: {artifact_path.name}")
+        conversions.append(convert_and_report(artifact_path, target_dir, artifact_type, agent))
 
     log_success(f"{label_plural.title()} synced to {target_dir}")
+    print_conversion_summary(conversions, agent, label_plural)
     if skipped_external:
         log_info(f"Skipped {skipped_external} external {label_plural} (hosted in upstream repos)")
 
@@ -640,7 +701,7 @@ def cmd_update(args):
     artifact_type = get_artifact_type(args)
     _, label_plural = get_artifact_labels(artifact_type)
 
-    target_dir = get_claude_artifacts_dir(artifact_type=artifact_type, scope=get_scope(args))
+    target_dir = agent_artifacts_dir(args, artifact_type, scope=get_scope(args))
     if args.target:
         target_dir = Path(args.target)
 
@@ -701,6 +762,8 @@ def cmd_update(args):
     if dry_run:
         print(f"\n{Colors.YELLOW}[DRY RUN] The following actions would be performed:{Colors.RESET}\n")
 
+    agent = get_agent(args)
+    conversions = []
     updated = 0
     skipped = 0
 
@@ -759,6 +822,7 @@ def cmd_update(args):
                     print(f"  {Colors.CYAN}-{Colors.RESET} {artifact_name}: {message}")
                 else:
                     log_success(f"{artifact_name}: {message}")
+                conversions.append(convert_and_report(artifact_path, target_dir, artifact_type, agent, dry_run))
                 updated += 1
             else:
                 log_warning(f"{artifact_name}: {message}")
@@ -769,6 +833,7 @@ def cmd_update(args):
         log_info(f"[DRY RUN] Would update {updated}/{len(to_update)} {label_plural}")
     else:
         log_success(f"Updated {updated}/{len(to_update)} {label_plural}")
+    print_conversion_summary(conversions, agent, label_plural, dry_run)
     if skipped:
         log_info(f"Skipped {skipped} {label_plural}")
     return 0
@@ -816,8 +881,11 @@ def cmd_validate(args):
     # Get skills to validate based on source
     if args.path:
         artifact_path = Path(args.path)
-        if artifact_path.is_file():
-            artifact_path = artifact_path.parent
+        flat_suffix = ARTIFACT_CONFIG[artifact_type].get("flat_file_suffix")
+        is_flat_artifact = artifact_path.is_file() and flat_suffix and artifact_path.name.endswith(flat_suffix)
+        if artifact_path.is_file() and not is_flat_artifact:
+            # a marker file: validate its artifact folder (hops over .claude-plugin/)
+            artifact_path = _artifact_folder_from_marker(artifact_path, ARTIFACT_CONFIG[artifact_type])
         artifacts_to_validate = [{"path": artifact_path, "folder_name": artifact_path.name}]
         return do_validate(artifacts_to_validate)
 
@@ -830,9 +898,9 @@ def cmd_validate(args):
     else:
         # Validate locally installed skills
         if args.project:
-            target_dir = get_claude_artifacts_dir(artifact_type=artifact_type, scope="project")
+            target_dir = agent_artifacts_dir(args, artifact_type, scope="project")
         else:
-            target_dir = get_claude_artifacts_dir(artifact_type=artifact_type, scope="personal")
+            target_dir = agent_artifacts_dir(args, artifact_type, scope="personal")
         artifacts_to_validate = discover_artifacts(target_dir, artifact_type=artifact_type)
         return do_validate(artifacts_to_validate)
 
@@ -841,14 +909,17 @@ def cmd_doctor(args):
     """doctor command: Diagnose artifact directory structure."""
     artifact_type = get_artifact_type(args)
     label, label_plural = get_artifact_labels(artifact_type)
-    marker_file = ARTIFACT_CONFIG[artifact_type]["marker"]
+    type_config = ARTIFACT_CONFIG[artifact_type]
+    marker_desc = describe_markers(type_config)
+    agent = get_agent(args)
+    managed_dirs = set(AGENT_CONFIG[agent]["managed_dirs"].get(artifact_type, []))
 
     issues = []
     warnings = []
 
     print(f"\n{Colors.BOLD}Artifacts CLI Doctor ({label_plural}){Colors.RESET}\n")
 
-    global_dir = get_claude_artifacts_dir(artifact_type=artifact_type, scope="personal")
+    global_dir = agent_artifacts_dir(args, artifact_type, scope="personal")
     print(f"  {Colors.CYAN}Global {label_plural}:{Colors.RESET} {global_dir}")
     if global_dir.exists():
         global_artifacts = discover_artifacts(global_dir, artifact_type=artifact_type)
@@ -861,7 +932,7 @@ def cmd_doctor(args):
     else:
         print(f"    {Colors.YELLOW}⚠{Colors.RESET} Directory does not exist")
 
-    project_dir = get_claude_artifacts_dir(artifact_type=artifact_type, scope="project")
+    project_dir = agent_artifacts_dir(args, artifact_type, scope="project")
     print(f"\n  {Colors.CYAN}Project {label_plural}:{Colors.RESET} {project_dir}")
     if project_dir.exists():
         project_artifacts = discover_artifacts(project_dir, artifact_type=artifact_type)
@@ -876,18 +947,26 @@ def cmd_doctor(args):
 
     print(f"\n  {Colors.CYAN}Checking for orphaned directories...{Colors.RESET}")
     orphaned = []
+    skipped_managed = []
     for artifacts_dir in [global_dir, project_dir]:
         if artifacts_dir.exists():
             for item in artifacts_dir.iterdir():
-                if item.is_dir() and not item.name.startswith("."):
-                    marker_path = item / marker_file
-                    if not marker_path.exists():
-                        orphaned.append(item)
-                        issues.append(f"Orphaned directory (no {marker_file}): {item}")
+                if not item.is_dir() or item.name.startswith("."):
+                    continue
+                if item.name in managed_dirs:
+                    skipped_managed.append(item.name)
+                    continue
+                # Same marker lookup as discovery, so anything discoverable is not orphaned
+                if _find_marker_in_folder(item, type_config) is None:
+                    orphaned.append(item)
+                    issues.append(f"Orphaned directory (no {marker_desc}): {item}")
 
+    if skipped_managed:
+        print(f"    {Colors.YELLOW}○{Colors.RESET} Skipped {AGENT_CONFIG[agent]['label']}-managed folders: "
+              f"{', '.join(sorted(skipped_managed))}")
     if orphaned:
         for item in orphaned:
-            print(f"    {Colors.RED}✗{Colors.RESET} {item.name} (no {marker_file})")
+            print(f"    {Colors.RED}✗{Colors.RESET} {item.name} (no {marker_desc})")
     else:
         print(f"    {Colors.GREEN}✓{Colors.RESET} No orphaned directories")
 
@@ -965,6 +1044,18 @@ def add_type_argument(parser: argparse.ArgumentParser, include_all: bool = False
     )
 
 
+def add_agent_argument(parser: argparse.ArgumentParser) -> None:
+    """Add shared --agent argument selecting the target agent's directories and conventions."""
+    parser.add_argument(
+        "--agent",
+        "-A",
+        choices=sorted(AGENT_CONFIG.keys()),
+        default=None,
+        help=f"Target agent (default: {DEFAULT_AGENT}; override with AGENTKIT_DEFAULT_AGENT). "
+             "Artifacts are converted to the agent's conventions on install/update/sync",
+    )
+
+
 def add_items_argument(parser: argparse.ArgumentParser, action: str) -> None:
     """Add shared --items argument while preserving --skills compatibility."""
     parser.add_argument(
@@ -1027,7 +1118,7 @@ def main():
         sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(
         prog="agentkit",
-        description="Cross-platform CLI for managing Claude Code artifacts",
+        description="Cross-platform CLI for managing Claude Code and Qwen Code artifacts",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -1055,6 +1146,10 @@ Examples:
   agentkit remove --type agents --all
 
   # Other commands
+  # Target Qwen Code instead of Claude Code (converts conventions on install)
+  agentkit install --all --agent qwen
+  agentkit skills install --items my-skill --agent qwen --dry-run
+
   agentkit installed --detail
   agentkit agents installed
   agentkit update --all
@@ -1111,13 +1206,14 @@ Examples:
     # Installed command
     installed_parser = subparsers.add_parser("installed", help="List installed artifacts")
     installed_parser.add_argument("--project", "-p", action="store_true",
-                                  help="Show project artifacts (.claude/<type>/)")
+                                  help="Show project artifacts (.<agent>/<type>/)")
     installed_parser.add_argument("--target", "-t", help="Custom artifact directory")
     installed_parser.add_argument("--detail", "-d", action="store_true",
                                   help="Show detailed info (name, description, version)")
     installed_parser.add_argument("--check-updates", "-u", action="store_true",
                                   help="Check each artifact against its upstream and show update status (implies --detail)")
     add_type_argument(installed_parser)
+    add_agent_argument(installed_parser)
     installed_parser.set_defaults(func=cmd_installed)
 
     # Remove command
@@ -1148,7 +1244,7 @@ Examples:
     add_items_argument(remove_parser, action="remove")
     remove_parser.add_argument("--all", "-a", action="store_true", help="Remove all artifacts of selected type")
     remove_parser.add_argument("--scope", choices=["global", "local"], default="global",
-                               help="Config scope: global (~/.claude/) or local (.claude/ in project) (default: global)")
+                               help="Config scope: global (~/.<agent>/) or local (.<agent>/ in project) (default: global)")
     remove_parser.add_argument("--project", "-p", action="store_true", help=argparse.SUPPRESS)
     remove_parser.add_argument("--target", "-t", help="Custom artifact directory")
     remove_parser.add_argument("--force", "-f", action="store_true",
@@ -1156,6 +1252,7 @@ Examples:
     remove_parser.add_argument("--dry-run", action="store_true",
                                help="Show what would be removed without actually removing")
     add_type_argument(remove_parser)
+    add_agent_argument(remove_parser)
     remove_parser.set_defaults(func=cmd_remove)
 
     # Install command
@@ -1180,6 +1277,7 @@ Examples:
   agentkit install https://github.com/your-org/your-repo --type plugins --all --scope local
   agentkit install --all --dry-run
   agentkit install --all --force --backup
+  agentkit install --all --agent qwen              # install into ~/.qwen/, converting conventions
 """
     )
     install_parser.add_argument("repo_url", nargs="?", default=None,
@@ -1191,7 +1289,7 @@ Examples:
     add_items_argument(install_parser, action="install")
     install_parser.add_argument("--all", "-a", action="store_true", help="Install all artifacts of selected type")
     install_parser.add_argument("--scope", choices=["global", "local"], default="global",
-                                help="Config scope: global (~/.claude/) or local (.claude/ in project) (default: global)")
+                                help="Config scope: global (~/.<agent>/) or local (.<agent>/ in project) (default: global)")
     install_parser.add_argument("--project", "-p", action="store_true", help=argparse.SUPPRESS)
     install_parser.add_argument("--target", "-t", help="Custom target directory")
     install_parser.add_argument("--force", "-f", action="store_true", help="Overwrite existing artifacts")
@@ -1200,6 +1298,7 @@ Examples:
     install_parser.add_argument("--dry-run", action="store_true",
                                 help="Show what would be installed without actually installing")
     add_type_argument(install_parser)
+    add_agent_argument(install_parser)
     install_parser.add_argument("--no-cache", action="store_true", help="Force fresh clone, ignoring local cache")
     install_parser.set_defaults(func=cmd_install)
 
@@ -1225,9 +1324,10 @@ Examples:
                              help=f"Repository URL (default: Anthropic official)")
     sync_parser.add_argument("--branch", "-b", help="Git branch (default: auto-detect or main)")
     sync_parser.add_argument("--project", "-p", action="store_true",
-                             help="Sync to project .claude/<type>/")
+                             help="Sync to project .<agent>/<type>/")
     sync_parser.add_argument("--target", "-t", help="Custom target directory")
     add_type_argument(sync_parser)
+    add_agent_argument(sync_parser)
     sync_parser.add_argument("--no-cache", action="store_true", help="Force fresh clone, ignoring local cache")
     sync_parser.set_defaults(func=cmd_sync)
 
@@ -1256,7 +1356,7 @@ Examples:
     add_items_argument(update_parser, action="update")
     update_parser.add_argument("--all", "-a", action="store_true", help="Update all installed artifacts of selected type")
     update_parser.add_argument("--scope", choices=["global", "local"], default="global",
-                               help="Config scope: global (~/.claude/) or local (.claude/ in project) (default: global)")
+                               help="Config scope: global (~/.<agent>/) or local (.<agent>/ in project) (default: global)")
     update_parser.add_argument("--project", "-p", action="store_true", help=argparse.SUPPRESS)
     update_parser.add_argument("--target", "-t", help="Custom artifact directory")
     update_parser.add_argument("--backup", action="store_true",
@@ -1264,6 +1364,7 @@ Examples:
     update_parser.add_argument("--dry-run", action="store_true",
                                help="Show what would be updated without actually updating")
     add_type_argument(update_parser)
+    add_agent_argument(update_parser)
     update_parser.add_argument("--no-cache", action="store_true", help="Force fresh clone, ignoring local cache")
     update_parser.set_defaults(func=cmd_update)
 
@@ -1275,11 +1376,13 @@ Examples:
     validate_parser.add_argument("--project", "-p", action="store_true",
                                  help="Validate project artifacts")
     add_type_argument(validate_parser)
+    add_agent_argument(validate_parser)
     validate_parser.set_defaults(func=cmd_validate)
 
     # Doctor command
     doctor_parser = subparsers.add_parser("doctor", help="Diagnose artifact directory issues")
     add_type_argument(doctor_parser)
+    add_agent_argument(doctor_parser)
     doctor_parser.add_argument("--check-updates", "-u", action="store_true",
                                help="Check each installed artifact against its upstream for available updates")
     doctor_parser.set_defaults(func=cmd_doctor)

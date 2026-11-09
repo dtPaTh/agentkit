@@ -50,6 +50,7 @@ COMMON_SKILL_DIRS = [
     "claude-skills",
     ".claude/skills",
     "claude/skills",
+    ".qwen/skills",
     "src/skills",
 ]
 
@@ -71,6 +72,7 @@ ARTIFACT_CONFIG = {
             "commands",
             ".claude/commands",
             "claude/commands",
+            ".qwen/commands",
             "src/commands",
         ],
     },
@@ -84,6 +86,7 @@ ARTIFACT_CONFIG = {
             "agents",
             ".claude/agents",
             "claude/agents",
+            ".qwen/agents",
             "src/agents",
         ],
     },
@@ -91,7 +94,9 @@ ARTIFACT_CONFIG = {
         "label": "plugin",
         "label_plural": "plugins",
         "marker": "PLUGIN.md",
-        "alt_markers": ["plugin.json"],
+        "alt_markers": ["plugin.json", "qwen-extension.json"],
+        # Fields checked in JSON manifests: name is the only field Claude Code's plugin.json requires
+        "json_required_fields": ["name"],
         "nested_marker_dirs": [".claude-plugin"],
         "marketplace_manifest": ".claude-plugin/marketplace.json",
         "required_fields": ["name", "description"],
@@ -99,6 +104,7 @@ ARTIFACT_CONFIG = {
             "plugins",
             ".claude/plugins",
             "claude/plugins",
+            ".qwen/extensions",
             "src/plugins",
             "external_plugins",
         ],
@@ -112,6 +118,108 @@ def get_artifact_config(artifact_type: str = "skills") -> dict:
     if normalized not in ARTIFACT_CONFIG:
         raise ValueError(f"Unsupported artifact type: {artifact_type}")
     return ARTIFACT_CONFIG[normalized]
+
+
+# =============================================================================
+# Target Agent Configuration
+# =============================================================================
+
+# Default target agent (override with AGENTKIT_DEFAULT_AGENT or --agent)
+DEFAULT_AGENT = (os.environ.get("AGENTKIT_DEFAULT_AGENT") or "claude").strip().lower()
+
+# Per-agent conventions. Conversion between agents maps one side of this table
+# onto the other, so every entry must be expressible for each agent.
+# Tool names are keyed by a neutral canonical id.
+AGENT_CONFIG = {
+    "claude": {
+        "label": "Claude Code",
+        # Executable name, used to flag scripts that invoke this agent
+        "cli": "claude",
+        "config_dir": ".claude",
+        "context_file": "CLAUDE.md",
+        # Install subdirectory per artifact type when it differs from the type name
+        "type_dirs": {},
+        # Folders the agent itself manages inside an artifact dir (not artifacts, never orphans).
+        # Claude Code's plugin manager keeps marketplace clones, cache, store and sync state here.
+        "managed_dirs": {"plugins": ["cache", "marketplaces", "store", "synced"]},
+        "args_placeholder": "$ARGUMENTS",
+        "skill_tools_key": "allowed-tools",
+        "skill_tools_style": "string",
+        "agent_mode_key": "permissionMode",
+        "agent_modes": {
+            "default": "default",
+            "plan": "plan",
+            "accept_edits": "acceptEdits",
+            "bypass": "bypassPermissions",
+        },
+        "tools": {
+            "read": "Read",
+            "write": "Write",
+            "shell": "Bash",
+            "list": "LS",
+            "todo": "TodoWrite",
+        },
+        # Tools with no equivalent in other agents (dropped on conversion)
+        "dropped_tools": ["BashOutput", "KillShell"],
+        "plugin_manifest": ".claude-plugin/plugin.json",
+        # Any of these means the plugin is already recognizable by this agent
+        "plugin_markers": ["PLUGIN.md", "plugin.json", ".claude-plugin/plugin.json"],
+        "plugin_hint": "",
+        "command_formats": [".md"],
+        # Constructs other agents don't understand: (regex, description)
+        "command_syntax": [
+            (r"(?<!\\)\$[1-9](?!\d)", "positional argument $N"),
+            (r"!`[^`\n]+`", "inline bash !`cmd`"),
+        ],
+        "skill_syntax": [
+            (r"\$ARGUMENTS", "$ARGUMENTS placeholder in skill body"),
+        ],
+    },
+    "qwen": {
+        "label": "Qwen Code",
+        "cli": "qwen",
+        "config_dir": ".qwen",
+        "context_file": "QWEN.md",
+        "type_dirs": {"plugins": "extensions"},
+        "managed_dirs": {},
+        "args_placeholder": "{{args}}",
+        "skill_tools_key": "allowedTools",
+        "skill_tools_style": "list",
+        "agent_mode_key": "approvalMode",
+        "agent_modes": {
+            "default": "default",
+            "plan": "plan",
+            "accept_edits": "auto-edit",
+            "bypass": "yolo",
+        },
+        "tools": {
+            "read": "ReadFile",
+            "write": "WriteFile",
+            "shell": "Shell",
+            "list": "ListFiles",
+            "todo": "TodoList",
+        },
+        "dropped_tools": [],
+        "plugin_manifest": "qwen-extension.json",
+        "plugin_markers": ["qwen-extension.json"],
+        "plugin_hint": "use `qwen extensions install <repo>` for a full conversion",
+        "command_formats": [".md", ".toml"],
+        "command_syntax": [
+            (r"!\{", "shell injection !{...}"),
+            (r"@\{", "file injection @{...}"),
+        ],
+        "skill_syntax": [],
+    },
+}
+
+
+def get_agent_config(agent: Optional[str] = None) -> dict:
+    """Return the configuration for a target agent (default: DEFAULT_AGENT)."""
+    normalized = (agent or DEFAULT_AGENT).strip().lower()
+    if normalized not in AGENT_CONFIG:
+        supported = ", ".join(sorted(AGENT_CONFIG))
+        raise ValueError(f"Unsupported agent: {agent or DEFAULT_AGENT} (supported: {supported})")
+    return AGENT_CONFIG[normalized]
 
 
 # =============================================================================
@@ -768,18 +876,30 @@ def parse_skill_md(skill_md: Path) -> dict:
 # Installation and Management
 # =============================================================================
 
-def get_claude_artifacts_dir(artifact_type: str = "skills", scope: str = "personal") -> Path:
+def get_artifacts_dir(
+    artifact_type: str = "skills",
+    scope: str = "personal",
+    agent: Optional[str] = None,
+) -> Path:
     """
-    Get the Claude Code artifact installation directory.
+    Get the artifact installation directory for a target agent.
 
     Args:
+        artifact_type: skills, commands, agents or plugins
         scope: "personal" (global) or "project"
+        agent: target agent (default: DEFAULT_AGENT), e.g. "claude" -> ~/.claude/skills,
+               "qwen" -> ~/.qwen/skills, plugins for qwen -> ~/.qwen/extensions
     """
     get_artifact_config(artifact_type)
-    if scope == "project":
-        return Path.cwd() / ".claude" / artifact_type
-    else:
-        return Path.home() / ".claude" / artifact_type
+    agent_config = get_agent_config(agent)
+    subdir = agent_config["type_dirs"].get(artifact_type, artifact_type)
+    base = Path.cwd() if scope == "project" else Path.home()
+    return base / agent_config["config_dir"] / subdir
+
+
+def get_claude_artifacts_dir(artifact_type: str = "skills", scope: str = "personal") -> Path:
+    """Backward compatible wrapper: Claude Code artifact installation directory."""
+    return get_artifacts_dir(artifact_type=artifact_type, scope=scope, agent="claude")
 
 
 def backup_artifact(artifact_path: Path) -> Optional[Path]:
@@ -930,22 +1050,27 @@ def validate_artifact_md(artifact_path: Path, artifact_type: str = "skills") -> 
         List of issues, empty list if validation passes
     """
     config = get_artifact_config(artifact_type)
-    marker_file = config["marker"]
     required_fields = config["required_fields"]
     label = config["label"]
+    artifact_path = Path(artifact_path)
 
     issues = []
-    marker_md = artifact_path / marker_file
+    # Same marker lookup as discovery: flat files are their own marker
+    marker_md = artifact_path if artifact_path.is_file() else _find_marker_in_folder(artifact_path, config)
 
-    if not marker_md.exists():
-        issues.append(f"Missing {marker_file} file")
+    if marker_md is None:
+        issues.append(f"Missing {describe_markers(config)} file")
         return issues
+    marker_file = marker_md.name
 
     try:
         content = marker_md.read_text(encoding="utf-8")
     except Exception as e:
         issues.append(f"Cannot read {marker_file}: {e}")
         return issues
+
+    if marker_md.suffix == ".json":
+        return _validate_json_marker(content, marker_file, config)
 
     if not content.startswith("---"):
         issues.append("Missing YAML frontmatter (should start with ---)")
@@ -978,6 +1103,38 @@ def validate_artifact_md(artifact_path: Path, artifact_type: str = "skills") -> 
     if metadata.get("description") and len(metadata["description"]) > 500:
         issues.append("Description is too long (>500 characters)")
 
+    return issues
+
+
+def describe_markers(config: dict) -> str:
+    """Human-readable list of accepted markers, e.g. 'PLUGIN.md / plugin.json, also in .claude-plugin/'."""
+    desc = " / ".join([config["marker"], *config.get("alt_markers", [])])
+    nested = config.get("nested_marker_dirs", [])
+    if nested:
+        desc += f" (also in {' / '.join(d + '/' for d in nested)})"
+    return desc
+
+
+def _validate_json_marker(content: str, marker_file: str, config: dict) -> list[str]:
+    """Validate a JSON manifest marker (plugin.json, qwen-extension.json)."""
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError as e:
+        return [f"Invalid JSON in {marker_file}: {e.msg} (line {e.lineno})"]
+    if not isinstance(data, dict):
+        return [f"{marker_file} must contain a JSON object"]
+
+    issues = []
+    for field in config.get("json_required_fields", config["required_fields"]):
+        value = data.get(field)
+        if not isinstance(value, str) or not value.strip():
+            issues.append(f"Missing required field: {field}")
+    name = data.get("name")
+    if isinstance(name, str) and len(name) > 50:
+        issues.append("Name is too long (>50 characters)")
+    description = data.get("description")
+    if isinstance(description, str) and len(description) > 500:
+        issues.append("Description is too long (>500 characters)")
     return issues
 
 

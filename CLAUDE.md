@@ -1,7 +1,7 @@
 # AgentKit - Project Memory
 
 ## Project Overview
-Cross-platform CLI tool for managing Claude Code and Claude Desktop skills. Written in Python with no external dependencies (uses only standard library).
+Cross-platform CLI tool for managing Claude Code, Qwen Code and Claude Desktop skills. Written in Python with no external dependencies (uses only standard library).
 
 ## Tech Stack
 - **Language**: Python 3.10+
@@ -14,7 +14,8 @@ agentkit/
 ├── agentkit/
 │   ├── __init__.py    # Package init, exports main()
 │   ├── cli.py         # CLI argument parsing and commands
-│   └── core.py        # Core logic (git operations, skill discovery, etc.)
+│   ├── core.py        # Core logic (git operations, skill discovery, AGENT_CONFIG, etc.)
+│   └── convert.py     # Agent convention conversion driven by core.AGENT_CONFIG
 ├── tests/
 ├── pyproject.toml     # Project configuration
 └── install.sh         # Installation script
@@ -30,6 +31,7 @@ agentkit/
 - `agentkit pack [URL]` - Pack artifacts into zip files
 - `agentkit validate` - Validate artifacts format
 - `agentkit doctor` - Diagnose artifacts directory issues
+- `--agent {claude,qwen}` (default `claude`, env `AGENTKIT_DEFAULT_AGENT`) selects the target agent; install/update/sync convert conventions and print a report
 
 ## Development
 ```bash

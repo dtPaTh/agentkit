@@ -11,6 +11,8 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from agentkit import (
     parse_repo_url,
     ARTIFACT_CONFIG,
@@ -598,3 +600,125 @@ class TestCmdUpdate:
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])
+
+
+class TestCmdDoctorOrphans:
+    """doctor must accept every marker layout that discovery accepts."""
+
+    def test_only_folders_without_any_marker_are_orphaned(self, tmp_path, capsys):
+        from agentkit.cli import cmd_doctor
+
+        global_dir = tmp_path / "global"
+        layouts = {
+            "keep-primary-marker": "PLUGIN.md",
+            "keep-root-plugin-json": "plugin.json",
+            "keep-nested-plugin-json": ".claude-plugin/plugin.json",
+            "keep-qwen-extension-json": "qwen-extension.json",
+            "ShouldBeOrphaned": "README.md",
+        }
+        for folder, marker in layouts.items():
+            path = global_dir / folder / marker
+            path.parent.mkdir(parents=True, exist_ok=True)
+            content = '{"name": "x", "description": "d"}' if marker.endswith(".json") else "---\nname: x\ndescription: d\n---\nbody"
+            path.write_text(content)
+
+        dirs = {"personal": global_dir, "project": tmp_path / "missing-project"}
+        args = argparse.Namespace(type="plugins", agent=None, check_updates=False)
+        with patch("agentkit.cli.get_artifacts_dir", side_effect=lambda artifact_type, scope, agent: dirs[scope]):
+            result = cmd_doctor(args)
+
+        orphan_lines = [line for line in capsys.readouterr().out.splitlines() if "Orphaned directory" in line]
+        assert result == 1
+        assert len(orphan_lines) == 1
+        assert "ShouldBeOrphaned" in orphan_lines[0]
+
+
+class TestPublicApi:
+
+    def test_readme_python_api_imports(self):
+        """Every name imported in the README's Python API example is exported."""
+        import re
+        import agentkit
+
+        readme = (Path(__file__).parent.parent / "README.md").read_text(encoding="utf-8")
+        block = re.search(r"from agentkit import \((.*?)\)", readme, re.S).group(1)
+        names = [n.strip() for n in block.split(",") if n.strip()]
+        assert names
+        missing = [n for n in names if not hasattr(agentkit, n)]
+        assert missing == []
+
+
+class TestValidateMarkerLayouts:
+    """validate_artifact_md must accept every layout discovery accepts."""
+
+    @pytest.mark.parametrize("marker", ["plugin.json", ".claude-plugin/plugin.json", "qwen-extension.json"])
+    def test_json_manifest_plugins_are_valid(self, tmp_path, marker):
+        manifest = tmp_path / "p" / marker
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text('{"name": "p", "version": "1.0.0"}')
+
+        assert validate_artifact_md(tmp_path / "p", artifact_type="plugins") == []
+
+    def test_json_manifest_without_name_is_reported(self, tmp_path):
+        (tmp_path / "plugin.json").write_text('{"description": "NameIsMissing"}')
+
+        assert validate_artifact_md(tmp_path, artifact_type="plugins") == ["Missing required field: name"]
+
+    def test_invalid_json_manifest_is_reported(self, tmp_path):
+        (tmp_path / "qwen-extension.json").write_text("{not json")
+
+        issues = validate_artifact_md(tmp_path, artifact_type="plugins")
+        assert len(issues) == 1 and issues[0].startswith("Invalid JSON in qwen-extension.json")
+
+    def test_flat_agent_file_is_validated_as_its_own_marker(self, tmp_path):
+        valid = tmp_path / "valid.agent.md"
+        valid.write_text("---\nname: valid\ndescription: d\n---\nPrompt")
+        no_desc = tmp_path / "no-desc.agent.md"
+        no_desc.write_text("---\nname: no-desc\n---\nPrompt")
+
+        assert validate_artifact_md(valid, artifact_type="agents") == []
+        assert validate_artifact_md(no_desc, artifact_type="agents") == ["Missing required field: description"]
+
+    def test_cmd_validate_path_accepts_flat_file_and_nested_marker(self, tmp_path, capsys):
+        from agentkit.cli import cmd_validate
+
+        agent = tmp_path / "flat-agent.agent.md"
+        agent.write_text("---\nname: flat-agent\ndescription: d\n---\nPrompt")
+        nested = tmp_path / "nested-plugin" / ".claude-plugin" / "plugin.json"
+        nested.parent.mkdir(parents=True)
+        nested.write_text('{"name": "nested-plugin"}')
+
+        base = dict(repo=None, branch=None, project=False, agent=None)
+        assert cmd_validate(argparse.Namespace(path=str(agent), type="agents", **base)) == 0
+        assert cmd_validate(argparse.Namespace(path=str(nested), type="plugins", **base)) == 0
+        out = capsys.readouterr().out
+        assert "flat-agent.agent.md" in out and "nested-plugin" in out
+
+
+class TestCmdDoctorManagedDirs:
+
+    def _run(self, tmp_path, agent: str, capsys) -> str:
+        from agentkit.cli import cmd_doctor
+
+        global_dir = tmp_path / "global"
+        for folder in ("cache", "marketplaces", "store", "synced", "ShouldBeOrphaned"):
+            (global_dir / folder).mkdir(parents=True)
+        dirs = {"personal": global_dir, "project": tmp_path / "missing-project"}
+        args = argparse.Namespace(type="plugins", agent=agent, check_updates=False)
+        with patch("agentkit.cli.get_artifacts_dir", side_effect=lambda artifact_type, scope, agent: dirs[scope]):
+            cmd_doctor(args)
+        return capsys.readouterr().out
+
+    def test_claude_managed_plugin_folders_are_skipped(self, tmp_path, capsys):
+        out = self._run(tmp_path, "claude", capsys)
+
+        orphan_lines = [line for line in out.splitlines() if "Orphaned directory" in line]
+        assert len(orphan_lines) == 1 and "ShouldBeOrphaned" in orphan_lines[0]
+        assert "Skipped Claude Code-managed folders: cache, marketplaces, store, synced" in out
+
+    def test_managed_folders_are_agent_specific(self, tmp_path, capsys):
+        out = self._run(tmp_path, "qwen", capsys)
+
+        orphan_lines = [line for line in out.splitlines() if "Orphaned directory" in line]
+        assert len(orphan_lines) == 5  # Claude's managed names mean nothing under ~/.qwen/extensions
+        assert "managed folders" not in out

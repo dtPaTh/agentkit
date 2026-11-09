@@ -4,7 +4,7 @@
 
 **Cross-platform CLI for managing Claude Code and Claude Desktop artifacts**
 
-<img src="assets/hero.svg" alt="Artifacts CLI Architecture" width="700"/>
+<img src="assets/hero.svg" alt="AgentKit architecture: Git repo to Claude Code, Qwen Code and Claude Desktop" width="700"/>
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
@@ -56,6 +56,7 @@
 | 🛡️ **Safety controls** | `--dry-run` preview, `--backup` before overwrite |
 | 📍 **Source tracking** | Records installation source for each artifact |
 | 🚀 **Dual deployment** | Claude Code (`~/.claude/<type>/`) + Claude Desktop (`.zip` packs) |
+| 🔀 **Multi-agent targets** | Install for Claude Code (default) or Qwen Code (`--agent qwen`), converting conventions both ways with a change report |
 | ⚡ **Repo cache** | Repos are cached locally and updated with `git fetch` on reuse |
 
 
@@ -352,14 +353,62 @@ $env:AGENTKIT_DEFAULT_REPO = "https://github.com/your-org/your-repo"
 
 Once set, `agentkit list agents` uses your repo without any flags.
 
+### Target Agent
+
+AgentKit installs for **Claude Code** by default. Use `--agent` (`-A`) on `install`, `update`, `sync`, `remove`, `installed`, `validate` and `doctor` to target **Qwen Code** instead, or change the default:
+
+```bash
+agentkit install --all --agent qwen               # installs into ~/.qwen/skills/
+agentkit plugins install <url> --all --agent qwen # installs into ~/.qwen/extensions/
+
+# macOS / Linux
+export AGENTKIT_DEFAULT_AGENT=qwen
+# Windows PowerShell
+$env:AGENTKIT_DEFAULT_AGENT = "qwen"
+```
+
+| | Claude Code (`claude`) | Qwen Code (`qwen`) |
+|---|---|---|
+| Config dir | `~/.claude/`, `.claude/` | `~/.qwen/`, `.qwen/` |
+| Context file | `CLAUDE.md` | `QWEN.md` |
+| Plugins | `<dir>/plugins/<name>` + `.claude-plugin/plugin.json` | `<dir>/extensions/<name>` + `qwen-extension.json` |
+| Command arguments | `$ARGUMENTS` | `{{args}}` |
+| Skill tool allowlist | `allowed-tools: Read, Bash` | `allowedTools:` YAML list |
+| Agent tool names | `Read`, `Write`, `Bash`, `LS`, `TodoWrite` | `ReadFile`, `WriteFile`, `Shell`, `ListFiles`, `TodoList` |
+| Agent permission mode | `permissionMode: acceptEdits` / `bypassPermissions` | `approvalMode: auto-edit` / `yolo` |
+
+#### Conversion
+
+After an artifact is copied, AgentKit detects which agent's conventions it uses and converts it to the target agent, in either direction:
+
+- **Renames**: `CLAUDE.md` ↔ `QWEN.md` (skipped with a warning if the target file already exists) and nested `.claude/` ↔ `.qwen/` folders.
+- **Rewrites**: references in text files, e.g. `~/.claude/skills/x` → `~/.qwen/skills/x`, `.claude/plugins` → `.qwen/extensions`. Lookalikes such as `.claude-plugin/` and `.claude.json` are not touched.
+- **Conversions**: the mappings from the table above, also applied inside a plugin's `commands/`, `agents/` and `skills/`.
+- **Created files**: the target's plugin manifest, if the plugin has none.
+- **Script checks**: bundled scripts (`.py`, `.sh`, `.ps1`, `.js`, …) that invoke another agent's CLI (e.g. `["claude", "-p", …]` or `claude --print`) are reported. Agent CLIs are treated like any other external tool: the call is left as is, and porting it is up to you.
+- **Warnings**: anything without an equivalent is reported but left unchanged: positional `$1`…`$9`, `` !`cmd` ``, `!{…}` / `@{…}`, TOML commands, patterned tool entries like `Bash(git *)`, unmapped modes (e.g. `bubble`), and plugin hooks / MCP servers (for those, use `qwen extensions install <repo>`).
+
+If an artifact contains conventions of both agents, its content is left unchanged and a *mixed conventions* warning is shown. Artifacts with no agent-specific content are copied as-is. Every converted artifact prints a report, and `--dry-run` shows the same report without writing anything:
+
+```
+✓ my-skill: installed
+    ↳ converted for Qwen Code: 1 rename, 1 file rewrite, 1 conversion
+      → CLAUDE.md  → QWEN.md
+      ✎ SKILL.md  .claude → .qwen (2×)
+      ⇄ SKILL.md  allowed-tools → allowedTools; string → list format; tools Read→ReadFile
+ℹ Converted 1 skills to Qwen Code conventions: 1 rename, 1 file rewrite, 1 conversion
+```
+
+> Conversion is text-based. Path references inside bundled scripts are rewritten like any other file, but calls to an agent's CLI are only reported, never changed.
+
 ### Repo Cache
 
 Cloned repos are cached at `~/.cache/agentkit/` keyed by URL and branch. On subsequent runs the CLI does a `git fetch --depth=1` + `git reset` instead of a full clone. Use `--no-cache` to force a fresh clone.
 
 ### Scope: Global vs Local
 
-`--scope global` (default) installs to `~/.claude/<type>/` — available in all Claude sessions.  
-`--scope local` installs to `.claude/<type>/` in the current working directory — project-only.
+`--scope global` (default) installs to `~/.<agent>/<type>/` (e.g. `~/.claude/skills/`) — available in all sessions.  
+`--scope local` installs to `.<agent>/<type>/` in the current working directory — project-only.
 
 ---
 
@@ -376,14 +425,14 @@ Cloned repos are cached at `~/.cache/agentkit/` keyed by URL and branch. On subs
 
 ## 🗂️ Supported Artifact Conventions
 
-The CLI auto-detects common layout conventions used in the wild:
+The CLI auto-detects common layout conventions used in the wild. `validate` and `doctor` accept the same layouts (JSON manifests must contain a `name`):
 
 | Type | Layout | Marker |
 |------|--------|--------|
 | `skills` | `skills/<name>/SKILL.md` | `SKILL.md` |
 | `commands` | `commands/<name>/COMMAND.md` | `COMMAND.md` |
 | `agents` | `agents/<name>/AGENT.md` **or** `agents/<name>.agent.md` | `AGENT.md` / `.agent.md` |
-| `plugins` | `plugins/<name>/PLUGIN.md` **or** `plugins/<name>/plugin.json` | `PLUGIN.md` / `plugin.json` |
+| `plugins` | `plugins/<name>/PLUGIN.md`, `plugins/<name>/plugin.json`, `plugins/<name>/.claude-plugin/plugin.json` **or** `extensions/<name>/qwen-extension.json` | `PLUGIN.md` / `plugin.json` / `qwen-extension.json` |
 
 ## 🏗️ Architecture
 
@@ -391,10 +440,12 @@ The CLI auto-detects common layout conventions used in the wild:
 agentkit/           ← repo root
 ├── agentkit/         ← Python package
 │   ├── __init__.py   # Public API exports
-│   ├── core.py       # Core library (git, clone, discover, install, pack)
+│   ├── core.py       # Core library (git, clone, discover, install, pack, agent config)
+│   ├── convert.py    # Agent convention conversion (Claude Code <-> Qwen Code)
 │   └── cli.py        # CLI handlers (argparse, command functions)
 ├── tests/
-│   └── test_core.py  # Unit tests
+│   ├── test_core.py     # Unit tests
+│   └── test_convert.py  # Conversion + agent targeting tests
 └── pyproject.toml
 ```
 
@@ -408,6 +459,9 @@ from agentkit import (
     install_artifact,
     validate_artifact_md,
     get_claude_artifacts_dir,
+    get_artifacts_dir,
+    convert_artifact,
+    summarize_changes,
     get_repo_cache_dir,
 )
 
@@ -426,6 +480,11 @@ issues = validate_artifact_md(Path("./my-skill"), artifact_type="skills")
 # Get install directory
 global_dir = get_claude_artifacts_dir(artifact_type="skills", scope="personal")
 project_dir = get_claude_artifacts_dir(artifact_type="agents", scope="project")
+qwen_dir = get_artifacts_dir(artifact_type="plugins", scope="personal", agent="qwen")  # ~/.qwen/extensions
+
+# Convert an installed artifact to another agent's conventions (in place)
+changes = convert_artifact(qwen_dir / "my-plugin", "plugins", "qwen", dry_run=True)
+print(summarize_changes(changes))  # e.g. "1 file rewrite, 1 created file"
 ```
 
 ## 📋 Requirements
