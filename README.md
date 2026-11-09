@@ -2,7 +2,7 @@
 
 # 🛠️ AgentKit
 
-**Cross-platform CLI for managing Claude Code and Claude Desktop artifacts**
+**Cross-platform CLI for managing Claude Code, Qwen Code and Claude Desktop artifacts**
 
 <img src="assets/hero.svg" alt="AgentKit architecture: Git repo to Claude Code, Qwen Code and Claude Desktop" width="700"/>
 
